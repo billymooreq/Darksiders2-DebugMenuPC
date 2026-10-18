@@ -1,5 +1,7 @@
 # PC: камера, матрицы вида/проекции, игровой кадр, телепорт (задача 03, этап 4 — статика)
 
+**Уточнено в 04 (`playerfly_pc.md` §1):** 0x00B3CD27 берёт матрицу у **игры** `game->vt[0x7C]` 0x004CD9DA = копия **`StateCamera+0xC0`**; `0x00B3B15C`/`0x00AC153E` возвращают **мир**, не камеру. Тик StateCamera — vt[0x34] 0x005B8599. Позиция игрока — `+0x260` (setPos 0x00885681 сам обновляет и Actor `+0xF0`/узел сцены).
+
 Только статический разбор (игра не запускалась). Декомпиляция: `dumps/decomp_pc/{proj,proj_callers,winmain,apprun,gamerun,gameframe,tickcand,tick2,setpos_bind,setpos_native}.c`.
 
 ## 1. Игровая камера `game+0x138` = StateCamera [ПОДТВ статически]

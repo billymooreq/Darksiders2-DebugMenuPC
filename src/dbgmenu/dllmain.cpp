@@ -145,6 +145,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
             Log("unknown exe: hooks NOT installed, proxy only");
         }
     } else if (reason == DLL_PROCESS_DETACH) {
+        Flight_OnUnload(reserved != NULL);
         Log("==== unload (process exit=%d) ====", reserved != NULL);
     }
     return TRUE;
@@ -168,3 +169,11 @@ extern "C" HRESULT WINAPI Proxy_DllGetClassObject(REFCLSID c, REFIID r, LPVOID *
 extern "C" HRESULT WINAPI Proxy_DllRegisterServer(void) { return p_DllRegisterServer ? p_DllRegisterServer() : E_FAIL; }
 extern "C" HRESULT WINAPI Proxy_DllUnregisterServer(void) { return p_DllUnregisterServer ? p_DllUnregisterServer() : E_FAIL; }
 extern "C" LPCVOID WINAPI Proxy_GetdfDIJoystick(void) { return p_GetdfDIJoystick ? p_GetdfDIJoystick() : NULL; }
+
+// Offline test harness only (does nothing in the game): 1..4 fake game state, 5 = exception in the flight frame.
+extern "C" void __cdecl DbgMenuTest(int cmd)
+{
+    if (!g_testMode || g_gameMatch) return;
+    if (cmd == 5) Flight_TestThrow();
+    else Game_TestControl(cmd);
+}

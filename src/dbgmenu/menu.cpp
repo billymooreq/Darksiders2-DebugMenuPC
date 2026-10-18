@@ -11,7 +11,7 @@ bool g_showCameraPosition;
 static float s_panelAlpha = 0.80f;
 static float s_textScale = 1.00f;
 
-enum CmdType { CT_ACTION, CT_TOGGLE, CT_FLOAT };
+enum CmdType { CT_ACTION, CT_TOGGLE, CT_FLOAT, CT_ENUM };
 struct Command {
     const char *category;
     const char *name;
@@ -22,7 +22,13 @@ struct Command {
     float *value;      // CT_FLOAT (Left/Right)
     float vmin, vmax, step;
     const char *shortcut;
+    int *choice;                // CT_ENUM (Left/Right, Enter = next)
+    const char *const *names;
+    int numNames;
 };
+
+static const char *const kFlyCamNames[] = {"A", "B"};
+static const char *const kTeleportNames[] = {"setPos", "setPos+repeat"};
 
 static void Cmd_PlayerFly();
 static void Cmd_ShowTriggers();
@@ -30,10 +36,17 @@ static void On_ShowCameraPosition();
 
 // Command registry (like the Xbox console registry): one line = one menu item; categories in order of appearance.
 static const Command g_commands[] = {
-    {"General", "playerFly", "Allow player to float in the air for debugging (free camera, teleport). Task 04.",
+    {"General", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
+     "Space/C up/down, Enter or left click: teleport the player here, F2: back without teleport.",
      CT_ACTION, Cmd_PlayerFly, NULL, NULL, 0, 0, 0, "F2"},
+    {"General", "teleport method", "setPos: player setPos + setYaw once, like the game's teleportTo. "
+     "setPos+repeat: the same, applied again on the first 3 frames after the game resumes.",
+     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_teleportMode, kTeleportNames, 2},
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
      CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, NULL},
+    {"Camera", "fly camera", "How playerFly moves the view. A: writes the game camera itself (StateCamera). "
+     "B: replaces only the matrix given to the renderer. Can be switched while flying.",
+     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_flyCamMode, kFlyCamNames, 2},
     {"Graphics", "Show triggers", "Draw trigger volumes (EventManager detectors). Task 05.",
      CT_ACTION, Cmd_ShowTriggers, NULL, NULL, 0, 0, 0, NULL},
     {"Menu", "Panel opacity", "Background opacity of the menu panel.",
@@ -81,10 +94,10 @@ void Menu_Status(const char *fmt, ...)
 
 static bool StatusActive() { return s_status[0] && (LONG)(s_statusUntil - GetTickCount()) > 0; }
 
-bool Menu_WantsDraw() { return g_menuOpen || g_showCameraPosition || StatusActive(); }
+bool Menu_WantsDraw() { return g_menuOpen || g_showCameraPosition || StatusActive() || g_flying; }
 
 // ---- commands ----
-static void Cmd_PlayerFly() { Menu_Status("playerFly: not implemented yet"); }
+static void Cmd_PlayerFly() { Flight_RequestToggle(); }  // done by the next game frame
 static void Cmd_ShowTriggers() { Menu_Status("Show triggers: not implemented yet"); }
 static void On_ShowCameraPosition() { Menu_Status("Show Camera Position %s", g_showCameraPosition ? "on" : "off"); }
 
@@ -100,12 +113,19 @@ static void Execute(const Command *c)
         break;
     case CT_FLOAT:
         break;
+    case CT_ENUM:
+        *c->choice = (*c->choice + 1) % c->numNames;
+        Menu_Status("%s: %s", c->name, c->names[*c->choice]);
+        break;
     }
 }
 
 static void Change(const Command *c, int dir)
 {
-    if (c->type == CT_TOGGLE) {
+    if (c->type == CT_ENUM) {
+        *c->choice = (*c->choice + c->numNames + dir) % c->numNames;
+        Menu_Status("%s: %s", c->name, c->names[*c->choice]);
+    } else if (c->type == CT_TOGGLE) {
         bool v = dir > 0;
         if (*c->flag != v) {
             *c->flag = v;
@@ -125,9 +145,8 @@ void Menu_HandleKey(int vk)
         Log("menu: %s", g_menuOpen ? "opened" : "closed");
         return;
     }
-    if (vk == VK_F2) {
+    if (vk == VK_F2) {  // the WndProc already requested the flight toggle
         Log("menu: F2 -> playerFly");
-        Cmd_PlayerFly();
         return;
     }
     if (!g_menuOpen) return;
@@ -244,6 +263,12 @@ static void DrawMenu()
             } else if (c->type == CT_FLOAT) {
                 sprintf_s(value, "< %.2f >", *c->value);
                 col = kOn;
+            } else if (c->type == CT_ENUM) {
+                sprintf_s(value, "< %s >", c->names[*c->choice]);
+                col = kOn;
+            } else if (c->action == Cmd_PlayerFly && g_flying) {
+                sprintf_s(value, "[flying]");
+                col = kOn;
             }
             Row(i == sel, label, value, col);
             if (i == sel) desc = c->desc;
@@ -275,9 +300,31 @@ static void DrawToast()
     ImGui::End();
 }
 
+// playerFly status line, bottom centre
+static void DrawFlyStatus()
+{
+    GameVec p;
+    if (!Flight_GetCamPos(&p)) return;
+    float fs = ImGui::GetFontSize();
+    ImGuiIO &io = ImGui::GetIO();
+    ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - fs * 1.5f), ImGuiCond_Always,
+                            ImVec2(0.5f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(s_panelAlpha * 0.85f);
+    ImGui::Begin("##dbgfly", NULL, kPanelFlags | ImGuiWindowFlags_AlwaysAutoResize);
+    ImGui::TextColored(kTitle, "FLY");
+    ImGui::SameLine();
+    ImGui::Text(" speed \xC3\x97%g  pos (%.0f %.0f %.0f)  cam %s ", Flight_SpeedMul(), p.x, p.y, p.z,
+                g_flyCamMode == FLYCAM_A ? "A" : "B");
+    ImGui::SameLine();
+    ImGui::TextDisabled(g_menuOpen ? "[menu open: flight stopped, F1 closes the menu]"
+                                   : "[Enter/LMB - teleport, F2 - exit]");
+    ImGui::End();
+}
+
 void Menu_Draw()
 {
     InitCategories();
+    DrawFlyStatus();
     if (g_menuOpen) DrawMenu();
     else if (StatusActive()) DrawToast();
 }
@@ -330,6 +377,8 @@ void Info_Draw()
     VecLine("pos", gi.camPosOk, gi.camPos, "vt[0x44]");
     VecLine("dir", gi.camPosOk, gi.camDir, "vt[0x40]");
     VecLine("+0xB0", gi.camSt == ST_OK || gi.camSt == ST_BADPTR, gi.camRaw, "raw");
+    GameVec fly;
+    if (Flight_GetCamPos(&fly)) VecLine("fly", true, fly, Flight_CamModeName(g_flyCamMode));
     if (gi.exCode) ImGui::TextColored(kStatus, "exception %08X at %08X", gi.exCode, gi.exAddr);
     ImGui::End();
 }

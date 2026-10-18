@@ -13,11 +13,12 @@
 
 ## 2. Схема работы
 - Пользователь планирует задачи с ассистентом-планировщиком (его память — `brain\`) и приносит **готовые промпты**. Номер задачи NN по порядку. Черновики будущих промптов лежат в `brain\prompts\` (только читать).
-- Длинная задача: `_claudework\notes\progress_NN.md`, запись после **каждого** этапа (что сделано, адреса, выводы, что осталось) — по нему продолжают после обрыва.
-- **В конце каждой задачи**: `_claudework\notes\review_NN_<тема>.md` (на русском, плотно, его читает планировщик): что сделано · ключевые находки · что не сделано / иначе · допущения и решения · проблемы и риски · технические данные · (чек-лист проверки в игре, если есть что проверять) · следующий шаг · вопросы ко мне. Старые ревью не менять.
-- Затем — обновить §8 «Текущее состояние» и §9 «Индекс» здесь, копию `_claudework\CLAUDE.md.copy`, и git по §10.
+- **Отчёт для планировщика — один файл `work_report.md`** в корне проекта (вне git), пишется **один раз в конце работы** и охватывает **все задачи промпта**; каждый раз перезаписывается целиком. Если работа оборвалась — коротко: что успел, что осталось. Формат (по-русски, плотно, ≤ ~60 строк): итог (1–3 строки) · что сделано · ключевые находки · проблемы и риски · чек-лист проверки в игре (шаги + «ожидается» + что важно в логе) · что нужно от пользователя · вопросы · следующий шаг.
+- **`review_NN_*.md` и `progress_NN.md` больше не пишутся** (старые не трогать). Технические подробности, адреса, решения — в память: §7–§9 этого файла и тематические заметки `_claudework\notes\`.
+- **Память — в конце работы** (до отчёта и коммита): §7 (факты), §8 (состояние), §9 (индекс), копия `_claudework\CLAUDE.md.copy`, нужные заметки. Цель: новый чат продолжит по этому файлу и заметкам.
+- По ходу — только **одна строка-контрольная точка в §8** после каждого большого этапа («NN: этап N готов — …; дальше …»).
+- Конец работы: память → `work_report.md` → git по §10 (без вопроса, тег `review-NN`).
 - Метки: [ГИП] — гипотеза, [ПОДТВ] — проверено.
-- При каждой остановке перезаписывать `work_report.md` в корне проекта (дата, что сделано, состояние, что нужно от пользователя). Он вне git-репо — не коммитится.
 - Общение — по-русски. Тексты для пользователя-игрока (README для установки DLL и т.п.) — коротко, простыми словами.
 
 ## 3. Жёсткие правила
@@ -54,7 +55,7 @@
 - **8.3-пути** (пробел в пути проекта ломает Ghidra и VMARGS): `_claudework` = `<repo>`, игра = `<game dir>`.
 - **Python**: `tools/venv/Scripts/python.exe -I` (pefile 2024.8.26, capstone 5.0.9).
 - **Компилятор**: MSVC 2022 Build Tools (cl 19.44, x86) + Windows SDK 10.0.26100 — **из системы**. Обёртка: `scripts\msvc32.bat <команда>` (vcvarsamd64_x86). Из bash: `cmd //c '<repo>\scripts\msvc32.bat cl /nologo …'` (пути — абсолютные 8.3; vcvars может сменить cwd). Флаги DLL: `/O2 /MT /LD`, `.def` для экспортов.
-- **Сборка DLL v0.2 (меню)**: `cmd //c '<repo>\src\dbgmenu\build.bat'` → `build\dinput8.dll` (+pdb; obj в `build\obj\`). Офлайн-тест без игры: `src\dbgmenu\test\test_d3d.cpp` (собрать в scratchpad рядом с копией DLL; ставит `DBGMENU_TEST=1`, жмёт клавиши PostMessage, Reset/пересоздание устройства, снимки `shotN.bmp`).
+- **Сборка DLL (меню, сейчас v0.3)**: `cmd //c '<repo>\src\dbgmenu\build.bat'` → `build\dinput8.dll` (+pdb; obj в `build\obj\`). Офлайн-тест без игры: `src\dbgmenu\test\test_d3d.cpp` (собрать в scratchpad рядом с копией DLL; ставит `DBGMENU_TEST=1`, жмёт клавиши PostMessage, Reset/пересоздание устройства, снимки `shotN.bmp`; полёт — через экспорт `DbgMenuTest(cmd)` и подделку объектов игры в `game.cpp`, см. `notes\playerfly_pc.md` §3).
 - **Сборка прокси v0.1**: `cmd //c '<repo>\src\proxy_dinput8\build.bat'` → `build\proxy_dinput8\dinput8.dll`. Офлайн-проверка без игры: `src\proxy_dinput8\test_load.c` (собрать в scratchpad рядом с копией DLL, запустить `test_load.exe [wait]`).
 - **Ghidra PC** (проект `ghidra_project\ds2pc`, программа `Darksiders2.exe`): `cmd //c 'scripts\ghidra_run.bat -postScript Decomp.java <repo>\dumps\decomp_pc\out.c <addr>…'` (адрес может быть внутри функции; `!addr` — создать функцию, если Ghidra её не нашла — таких много). Также `XRefs.java`, `StrRefs.java`, `ExportGzf.java` (с `-readOnly`). Переимпорт с нуля: `scripts\ghidra_import.bat` (~19 мин). Из `.gzf`: Ghidra → Import File.
 - **Ghidra Xbox** (копия): `scripts\ghidra_xbox.bat -postScript Decomp.java …`.
@@ -65,35 +66,37 @@
 - **Рендер D3D9** [ПОДТВ логом: d3d9 загружен, d3d11/dxgi — нет]. IAT: `Direct3DCreate9` 0x01155730, `XInputGetState`(ord 2) 0x011556D0, `DirectInput8Create` 0x01155028 (игра его **не вызывает** [ПОДТВ]). Ввод: Raw Input (`RegisterRawInputDevices`/`GetRawInputData`) + `GetAsyncKeyState`; окно своё (`RegisterClassExA`/`CreateWindowExA`).
 - Дебаг-кода нет: консоль/206 команд/DebugRenderer/OblivionGameDebug/FlyCameraState вырезаны.
 - Методы — `__thiscall`; handle с refcount в `obj+4`, release = `0x00401017` (ECX=obj).
-- Игра: `Darksiders::instance()` **0x004058CF** → `[0x0184E95C]`; `getPlayerActor(out)` **0x004CDA8F**; `getCamera(out)` **0x00745A0F** (= game+0x138); `setPaused(bool)` = `game->vt[0x68]` **0x00B3C287** (счётчик +0xF8; так Xbox «замораживает» мир на время полёта).
-- Объекты мира: позиция WorldObject `+0x90`, getPos/getRot/getScale = vt **0x38/0x40/0x48** (0x008EF6B2/0x00A24AFB/0x00A24B3D). Базовый setPosition vt 0x34 = 0x00A7F942 пишет только +0x90 (**физику персонажа, вероятно, не двигает** — телепорт ещё искать).
+- Игра: `Darksiders::instance()` **0x004058CF** → `[0x0184E95C]`; `getPlayerActor(out)` **0x004CDA8F**; `getCamera(out)` **0x00745A0F** (= game+0x138); `setPaused(bool)` = `game->vt[0x68]` **0x00B3C287** (счётчик +0xF8, ≥0; **работает только при `game+0x10 & 0x40`**). Vtable игры **0x0116E230**: vt[0x70] FOV, **vt[0x7C] 0x004CD9DA = матрица камеры для рендера** (копия `StateCamera+0xC0`).
+- Объекты мира: позиция WorldObject `+0x90`, getPos/getRot/getScale = vt **0x38/0x40/0x48** (0x008EF6B2/0x00A24AFB/0x00A24B3D), базовый setPosition vt 0x34 = 0x00A7F942 (только +0x90).
+- **Игрок переопределяет** [ПОДТВ логом v0.2 + статика 04]: vt 0x01266568, getPos vt[0x38] **0x00885362** = `+0x260` (сырое +0x90 = 0), setPos vt[0x34] **0x00885681** = `+0x260`, `+0x230`, vt[0x208]/vt[0x204], затем Actor::setPosition 0x0076A2F7 (`+0xF0` + узел сцены `+0xD4`, как Xbox); setYaw vt[0x138] **0x0077DE6A** → vt[0x2C4](yaw,0), yaw в **градусах**, dir→yaw = **0x00ACB5FC** (cdecl). На загрузках actor/camera бывают null, а pos актёра — (0,0,0).
 - Триггеры: `getEventManager(world=obj+0x58)` **0x007735E8** (World+0x118) → список `evm+0x14` {head,tail,count}, узел {next,obj}; DetectorObject vtable 0x01269E40, TriggerRegion 0x012702A0; поля +0x80 Shape, +0x90 Pos, +0xA0 Rot(°), +0xB0 Scale (полный размер), +0xD4 тело, +0xD8 enabled — **как на Xbox**. Фильтр: `vt[0x40]==0x00A24AFB && vt[0x48]==0x00A24B3D`.
 - **Поля совпадают с Xbox, а слоты vtable WorldObject на PC на 4 меньше** (у Game — совпадают). Каждый слот проверять.
-- Камера `game+0x138` = **StateCamera** vtable 0x01199EA0: матрица `cam+0x80` (vt[0x3C]), направление vt[0x40] (−строка 2), **позиция vt[0x44] = `cam+0xB0`**. Вид/проекция: 0x00925969 (view = transpose(renderCam+0x40), D3DXMatrixPerspectiveFovLH); камера→рендер 0x00B3CD27.
-- Главный цикл 0x00B3D821 → **кадр игры 0x00B3D3E4** (ECX=game; Xbox-тик, похоже, встроен). Возможен отдельный поток рендера (`game+0x10 & 1`).
-- Телепорт: игровой `teleportTo` 0x00796B71 = `actor->vt[0x34](&pos)` + `vt[0x138](yaw)`. Подробно — `notes\camera_teleport_pc.md`.
+- Камера `game+0x138` = **StateCamera** vtable 0x01199EA0 [ПОДТВ логом]: матрица `cam+0x80` (vt[0x3C]; строки right/up/back/pos), направление vt[0x40] (−строка 2), **позиция vt[0x44] = `cam+0xB0`** [ПОДТВ]; **`+0xC0` — матрица для рендера** (тик vt[0x34] 0x005B8599 копирует +0x80→+0xC0 и накладывает эффекты; setMatrix 0x005B5BEC пишет обе). Камера→рендер 0x00B3CD27 (`game->vt[0x7C]`), вид/проекция 0x00925969.
+- Главный цикл 0x00B3D821 → **кадр игры 0x00B3D3E4** (ECX=game; единственный вызов 0x00B3D85F). **Present, WndProc и логика — в одном потоке** [ПОДТВ логом v0.2].
+- Телепорт: игровой `teleportTo` 0x00796B71 = `actor->vt[0x34](&pos)` + `vt[0x138](0x00ACB5FC(&dir))`. playerFly v0.3 — `notes\playerfly_pc.md`.
 - Ввод: Raw Input клавиатуры без NOLEGACY (WM_KEYDOWN есть); WM_INPUT читается в WndProc игры (0x00403AF3 → 0x00913C78); `GetAsyncKeyState` только там же.
 
 ## 8. Текущее состояние (обновлять в конце задачи)
-- **Сделано:** 01 (setup + разведка + прокси v0.1), 02 (GitHub + память), **03 (DLL v0.2: меню F1 в Xbox-стиле, оверлей ImGui/D3D9 Present+Reset, блок ввода, showCameraPosition, статика для 04)**. Теги `review-01..03`.
-- **В игре проверено:** только v0.1. **v0.2 ещё не проверена в игре** — офлайн-тест пройден (`review_03` §6); в папке игры по-прежнему v0.1, пользователь ставит v0.2 сам по `build\README.md` и проходит чек-лист `review_03` §7.
-- **Следующий шаг:** получить `logs\dbgmenu.log` проверки v0.2 (совпадение позиций, vtable игрока/камеры, потоки Present/WndProc), затем **задача 04 — playerFly** по `notes\camera_teleport_pc.md` §5 (хук кадра 0x00B3D3E4, пауза vt[0x68], своя матрица в `StateCamera+0x80`, телепорт vt[0x34]+vt[0x138]); клавиши полёта — вопрос пользователю в `review_03` §9.
-- Потом: 05 — триггеры (обход EventManager, линии через вид/проекцию), 06 — полировка меню.
+- **Сделано:** 01 (setup + разведка + прокси v0.1), 02 (GitHub + память), 03 (DLL v0.2: меню F1, оверлей, блок ввода, showCameraPosition), **04 (новые правила отчёта/памяти §2; DLL v0.3: playerFly — F2, пауза, свободная камера A/B, телепорт setPos/setPos+repeat, аварийные выходы; `notes\playerfly_pc.md`)**. Теги `review-01..04`.
+- **В игре проверено:** v0.1, **v0.2 (2026-10-19, чек-лист пройден без замечаний; в папке игры сейчас v0.2)**. **v0.3 в игре не проверена** — офлайн-тест пройден; пользователь ставит её по `build\README.md` и проходит чек-лист из `work_report.md`.
+- **Следующий шаг:** лог проверки v0.3 → выбрать камеру A/B и способ телепорта, исправить найденное (знаки мыши/стрейфа, пауза, откат позиции); затем **05 — Show triggers** (обход EventManager, линии через вид/проекцию; матрицу вида можно брать из `game->vt[0x7C]` / `StateCamera+0xC0`).
+- Потом: 06 — полировка меню (клавиши, сохранение настроек).
 
 ## 9. Индекс заметок (`_claudework\notes\`)
 | файл | о чём |
 |---|---|
 | `review_01_setup_recon.md` | итог 01: exe, остатки отладки, playerFly, карта, план, прокси |
 | `review_02_github_memory.md` | итог 02: репо, LFS, что исключено, эта память |
-| `review_03_menu_overlay.md` | итог 03: DLL v0.2, решения по хукам/вводу, **чек-лист проверки в игре** |
+| `review_03_menu_overlay.md` | итог 03: DLL v0.2, решения по хукам/вводу, чек-лист v0.2 (последний review — дальше отчёт только в `work_report.md`) |
 | `progress_03.md` | журнал 03 (контрольная точка, офлайн-тест, найденная ошибка с refcount) |
-| `camera_teleport_pc.md` | **PC: StateCamera, вид/проекция, главный цикл/кадр, телепорт** — база для 04 |
+| `playerfly_pc.md` | **playerFly v0.3: статика 04 (рендер-матрица, пауза, setPos игрока, yaw), устройство, хуки, офлайн-тест, открытые вопросы** |
+| `camera_teleport_pc.md` | PC: StateCamera, вид/проекция, главный цикл/кадр, телепорт (база для 04; уточнения — в `playerfly_pc.md`) |
 | `progress_01.md` | журнал 01 по этапам |
 | `xbox_pc_map.md` | **таблица адресов Xbox→PC**, проверка смещений, фильтр детекторов |
 | `playerfly_xbox.md` | механизм playerFly на Xbox (адреса, псевдокод, скорости, поля) |
 | `plan_architecture.md` | архитектура: прокси, хуки, отрисовка, меню, playerFly, триггеры |
 | `game_changes.md` | журнал изменений в папке игры |
-| также | `README.md` (репо), `build\README.md` (инструкция игроку v0.2), `build\proxy_dinput8\README.md` (v0.1), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
+| также | `README.md` (репо), `build\README.md` (инструкция игроку v0.3), `build\proxy_dinput8\README.md` (v0.1), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
 
 ## 10. Git — схема конца задачи NN (без вопроса пользователю)
 Репо: `_claudework\` → `origin` = `git@github.com:billymooreq/Darksiders2-DebugMenu.git`, ветка `main`. LFS: `ghidra_export/*.gzf`.

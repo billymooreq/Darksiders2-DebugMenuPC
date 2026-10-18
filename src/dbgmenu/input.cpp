@@ -5,6 +5,8 @@
 //     IAT hook: presses become a no-op key (VKey 0xFF, break), mouse motion/wheel/button-downs are zeroed.
 // A key the game saw going down always gets its release, and a press we swallowed never leaks a release,
 // so no key stays "stuck" after the menu closes. F1/F2 (our hotkeys) never reach the game.
+// Flight (task 04): the same block while flying; the flight reads held keys and mouse motion from what we see
+// here (s_held, raw mouse deltas), Enter / left button request the teleport, losing the window aborts the flight.
 #include "common.h"
 
 volatile LONG g_menuOpen;
@@ -25,6 +27,32 @@ struct KeyPairing {
 };
 static KeyPairing s_legacy, s_raw;
 static USHORT s_mouseGameDown, s_mouseSwallowed;  // bit per mouse button 0..4
+static BYTE s_held[256];                          // physical state as we saw it (game thread only)
+static volatile LONG s_mouseDx, s_mouseDy;        // relative motion while flying
+static LPARAM s_lastMouseLp;                      // test mode: legacy WM_MOUSEMOVE deltas
+static bool s_lastMouseValid;
+
+bool Input_KeyHeld(int vk) { return s_held[vk & 0xFF] != 0; }
+
+void Input_TakeMouse(long *dx, long *dy)
+{
+    *dx = InterlockedExchange(&s_mouseDx, 0);
+    *dy = InterlockedExchange(&s_mouseDy, 0);
+}
+
+void Input_ResetFlight()
+{
+    InterlockedExchange(&s_mouseDx, 0);
+    InterlockedExchange(&s_mouseDy, 0);
+    s_lastMouseValid = false;
+}
+
+static void AddMouse(long dx, long dy)
+{
+    if (!g_flying || g_menuOpen) return;
+    InterlockedExchangeAdd(&s_mouseDx, dx);
+    InterlockedExchangeAdd(&s_mouseDy, dy);
+}
 
 static void PushKey(int vk)
 {
@@ -52,7 +80,12 @@ int Input_PopKey()
 void Input_SetMenuOpen(bool open)
 {
     InterlockedExchange(&g_menuOpen, open);
-    InterlockedExchange(&g_inputBlocked, open);  // task 04: also while flying
+    Input_UpdateBlock();
+}
+
+void Input_UpdateBlock()
+{
+    InterlockedExchange(&g_inputBlocked, (g_menuOpen || g_flying) ? 1 : 0);
 }
 
 static bool IsHotkey(int vk) { return vk == VK_F1 || vk == VK_F2; }
@@ -98,9 +131,11 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
         int vk = (int)(w & 0xFF);
         bool repeat = (l & 0x40000000) != 0;
         if (LogBudget(&firstKey, 1)) Log("input: first WM_KEYDOWN vk=%02X (legacy keyboard messages arrive)", vk);
+        s_held[vk] = 1;
         if (IsHotkey(vk)) {
             if (!repeat) {
                 if (vk == VK_F1 && (g_overlayReady || g_menuOpen)) Input_SetMenuOpen(!g_menuOpen);
+                if (vk == VK_F2) Flight_RequestToggle();  // executed by the next game frame
                 PushKey(vk);
             }
             KeyMake(s_legacy, vk, true);
@@ -108,20 +143,42 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
         }
         if (g_menuOpen && IsMenuKey(vk) && (!repeat || vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT))
             PushKey(vk);
+        else if (g_flying && !g_menuOpen && m == WM_KEYDOWN && vk == VK_RETURN && !repeat)
+            Flight_RequestTeleport();
         // Alt+F4 must keep working
         return KeyMake(s_legacy, vk, blocked && !(m == WM_SYSKEYDOWN && vk == VK_F4));
     }
     case WM_KEYUP:
     case WM_SYSKEYUP:
+        s_held[w & 0xFF] = 0;
         return KeyBreak(s_legacy, (int)(w & 0xFF));
+    case WM_ACTIVATEAPP:
+        if (!w) {
+            memset(s_held, 0, sizeof(s_held));
+            Flight_RequestAbort("window deactivated (Alt+Tab)");
+        }
+        return false;
+    case WM_KILLFOCUS:
+        memset(s_held, 0, sizeof(s_held));  // releases may go to another window
+        return false;
     case WM_CHAR:
     case WM_SYSCHAR:
     case WM_DEADCHAR:
     case WM_SYSDEADCHAR:
     case WM_UNICHAR:
         return blocked;
+    case WM_LBUTTONDOWN:
+        if (g_flying && !g_menuOpen) Flight_RequestTeleport();
+        return blocked;
     case WM_MOUSEMOVE:
-    case WM_LBUTTONDOWN: case WM_LBUTTONDBLCLK:
+        if (g_testMode) {  // offline test has no raw mouse: use the cursor motion
+            if (s_lastMouseValid)
+                AddMouse((short)LOWORD(l) - (short)LOWORD(s_lastMouseLp), (short)HIWORD(l) - (short)HIWORD(s_lastMouseLp));
+            s_lastMouseLp = l;
+            s_lastMouseValid = true;
+        }
+        return blocked;
+    case WM_LBUTTONDBLCLK:
     case WM_RBUTTONDOWN: case WM_RBUTTONDBLCLK:
     case WM_MBUTTONDOWN: case WM_MBUTTONDBLCLK:
     case WM_XBUTTONDOWN: case WM_XBUTTONDBLCLK:
@@ -148,6 +205,7 @@ static void FilterRaw(RAWINPUT *ri, UINT size)
         int vk = kb.VKey;
         if (LogBudget(&firstKb, 1)) Log("input: first raw keyboard event vk=%02X flags=%X", vk, kb.Flags);
         if (vk <= 0 || vk >= 0xFF) return;
+        s_held[vk] = (kb.Flags & RI_KEY_BREAK) ? 0 : 1;
         bool hide = (kb.Flags & RI_KEY_BREAK) ? KeyBreak(s_raw, vk) : KeyMake(s_raw, vk, blocked || IsHotkey(vk));
         if (hide) {  // a release of an unused virtual key: the game ignores it
             kb.VKey = 0xFF;
@@ -159,6 +217,8 @@ static void FilterRaw(RAWINPUT *ri, UINT size)
         RAWMOUSE &ms = ri->data.mouse;
         USHORT f = ms.usButtonFlags, out = 0;
         if (LogBudget(&firstMouse, 1)) Log("input: first raw mouse event flags=%X", f);
+        if (!(ms.usFlags & MOUSE_MOVE_ABSOLUTE)) AddMouse(ms.lLastX, ms.lLastY);
+        if ((f & RI_MOUSE_LEFT_BUTTON_DOWN) && g_flying && !g_menuOpen) Flight_RequestTeleport();
         for (int b = 0; b < 5; b++) {
             USHORT down = (USHORT)(1 << (2 * b)), up = (USHORT)(1 << (2 * b + 1)), bit = (USHORT)(1 << b);
             if (f & down) {

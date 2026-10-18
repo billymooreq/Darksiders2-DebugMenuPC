@@ -1,5 +1,5 @@
 @echo off
-rem Build dbgmenu dinput8.dll v0.2 (x86, /MT) into _claudework\build\dinput8.dll
+rem Build dbgmenu dinput8.dll v0.3 (x86, /MT) into _claudework\build\dinput8.dll
 setlocal
 set "W=<repo>"
 set "S=%W%\src\dbgmenu"
@@ -9,7 +9,7 @@ set "OBJ=%W%\build\obj\dbgmenu"
 if not exist "%OBJ%" mkdir "%OBJ%"
 call "%W%\scripts\msvc32.bat" cl /nologo /W3 /O2 /MT /EHsc /Zi /LD /DNDEBUG /DIMGUI_IMPL_WIN32_DISABLE_GAMEPAD ^
   /I"%T%\imgui" /I"%T%\imgui\backends" /I"%T%\minhook\include" ^
-  "%S%\dllmain.cpp" "%S%\hooks.cpp" "%S%\input.cpp" "%S%\overlay.cpp" "%S%\menu.cpp" "%S%\game.cpp" ^
+  "%S%\dllmain.cpp" "%S%\hooks.cpp" "%S%\input.cpp" "%S%\overlay.cpp" "%S%\menu.cpp" "%S%\game.cpp" "%S%\flight.cpp" ^
   "%T%\imgui\imgui.cpp" "%T%\imgui\imgui_draw.cpp" "%T%\imgui\imgui_tables.cpp" "%T%\imgui\imgui_widgets.cpp" ^
   "%T%\imgui\backends\imgui_impl_dx9.cpp" "%T%\imgui\backends\imgui_impl_win32.cpp" ^
   "%T%\minhook\src\buffer.c" "%T%\minhook\src\hook.c" "%T%\minhook\src\trampoline.c" "%T%\minhook\src\hde\hde32.c" ^

@@ -18,6 +18,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
         GetRawInputData((HRAWINPUT)l, RID_INPUT, NULL, &sz, sizeof(RAWINPUTHEADER));
     }
     if (m == WM_KEYDOWN) printf("  game WndProc got WM_KEYDOWN %02X\n", (unsigned)w);
+    if (m == WM_KEYUP) printf("  game WndProc got WM_KEYUP %02X\n", (unsigned)w);
+    if (m == WM_LBUTTONDOWN) printf("  game WndProc got WM_LBUTTONDOWN\n");
+    if (m == WM_MOUSEMOVE) printf("  game WndProc got WM_MOUSEMOVE\n");
     return DefWindowProcA(h, m, w, l);
 }
 
@@ -67,6 +70,18 @@ static void Key(int vk)
     PostMessageA(g_wnd, WM_KEYDOWN, vk, 1);
     PostMessageA(g_wnd, WM_KEYUP, vk, 0xC0000001);
 }
+static void KeyDown(int vk) { PostMessageA(g_wnd, WM_KEYDOWN, vk, 1); }
+static void KeyUp(int vk) { PostMessageA(g_wnd, WM_KEYUP, vk, 0xC0000001); }
+static void Mouse(int x, int y) { PostMessageA(g_wnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y)); }
+
+typedef void(__cdecl *DbgMenuTest_t)(int);
+static DbgMenuTest_t g_ctl;
+static void Ctl(int cmd)
+{
+    printf("-- DbgMenuTest(%d)\n", cmd);
+    if (g_ctl) g_ctl(cmd);
+}
+static void Say(const char *s) { printf("== %s\n", s); }
 
 int main()
 {
@@ -86,7 +101,9 @@ int main()
     g_d3d = Direct3DCreate9(D3D_SDK_VERSION);
     if (!g_d3d || !CreateDev(1280, 720)) return 2;
 
-    for (int frame = 1; frame <= 140; frame++) {
+    g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
+    printf("DbgMenuTest export %p\n", (void *)g_ctl);
+    for (int frame = 1; frame <= 520; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -119,6 +136,42 @@ int main()
         case 100: Key(VK_F1); break;
         case 110: Snapshot("shot4.bmp"); break;
         case 115: Key(VK_F1); break;
+        // ---- task 04: playerFly ----
+        case 125: Say("F2 before the level is loaded: unavailable"); Key(VK_F2); break;
+        case 130: Ctl(1); break;
+        case 135: Say("F2: enter flight"); Key(VK_F2); break;
+        case 140: Say("hold W (must not reach the game)"); KeyDown('W'); break;
+        case 160: KeyUp('W'); break;
+        case 163: Say("mouse right 50 px"); Mouse(100, 100); break;
+        case 164: Mouse(150, 100); break;
+        case 170: Say("Shift+D"); KeyDown(VK_SHIFT); KeyDown('D'); break;
+        case 180: KeyUp('D'); KeyUp(VK_SHIFT); break;
+        case 182: Snapshot("shot5.bmp"); break;
+        case 185: Say("Enter: teleport + exit"); Key(VK_RETURN); break;
+        case 190: Say("W after the flight must reach the game"); Key('W'); break;
+        case 200: Say("enter, hold A, F2 exit, release A (release must be swallowed)"); Key(VK_F2); break;
+        case 205: KeyDown('A'); break;
+        case 210: Key(VK_F2); break;
+        case 215: KeyUp('A'); break;
+        case 220: Say("enter, device Reset -> emergency exit"); Key(VK_F2); break;
+        case 225: printf("Reset -> %08lX\n", g_dev->Reset(&g_pp)); break;
+        case 235: Say("enter, WM_ACTIVATEAPP(0) -> emergency exit"); Key(VK_F2); break;
+        case 240: PostMessageA(g_wnd, WM_ACTIVATEAPP, FALSE, 0); break;
+        case 250: Say("enter, exception in the flight frame -> emergency exit"); Key(VK_F2); break;
+        case 252: Ctl(5); break;
+        case 260: Say("enter, player lost -> emergency exit"); Key(VK_F2); break;
+        case 262: Ctl(2); break;
+        case 270: Say("F2 with no player: unavailable"); Key(VK_F2); break;
+        case 272: Ctl(1); break;
+        case 275: Say("enter, menu open in flight, W held (not to the game, flight not controlled)"); Key(VK_F2); break;
+        case 277: Key(VK_F1); break;
+        case 280: KeyDown('W'); break;
+        case 285: KeyUp('W'); break;
+        case 286: Say("menu: Camera -> fly camera -> A"); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_DOWN); Key(VK_LEFT); break;
+        case 287: Snapshot("shot6.bmp"); break;
+        case 290: Key(VK_F1); break;
+        case 292: Say("left click: teleport + exit"); PostMessageA(g_wnd, WM_LBUTTONDOWN, MK_LBUTTON, 0); PostMessageA(g_wnd, WM_LBUTTONUP, 0, 0); break;
+        case 300: Say("click after the flight must reach the game"); PostMessageA(g_wnd, WM_LBUTTONDOWN, MK_LBUTTON, 0); PostMessageA(g_wnd, WM_LBUTTONUP, 0, 0); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();
