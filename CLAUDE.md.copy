@@ -1,86 +1,104 @@
 # CLAUDE.md — Darksiders II PC 2012: порт части Xbox-дебаг-меню
 
-Читается в начале каждой сессии. Коротко; подробности — в `_claudework/notes/` (индекс в §8). Пути — от корня проекта
+Читается в начале каждой сессии. Новый чат должен суметь продолжить работу **только по этому файлу** и заметкам по ссылкам (индекс — §9). Пути — от корня проекта
 `<project root>\`.
 
 ## 1. Проект и цель
-- Игра: **Darksiders II, PC-версия 2012** (не Deathinitive), `Darksiders II\Darksiders2.exe` — x86, VC10, 18.2 МБ, SHA-1 `1402d089…6d42`, PE TimeDateStamp `0x50241AFA`, base `0x00400000` **без ASLR**. exe не упакован.
-- Цель: перенести из DEBUG-сборки Xbox 360 (`<xbox project>\`) маленькую часть дебаг-меню:
-  1. **playerFly** — свободная камера + телепорт игрока в точку камеры;
-  2. **отображение триггеров** (на Xbox — патч Xenia через DebugRenderer).
-  Меню — своё, по возможности похожее на Xbox-меню.
+- Игра: **Darksiders II, PC-версия 2012** (не Deathinitive), `Darksiders II\Darksiders2.exe` — x86, VC2010, 18.2 МБ, SHA-1 `1402d08920a2343c0cfe261826ade47f008c6d42`, PE TimeDateStamp `0x50241AFA`, base `0x00400000` **без ASLR** (адреса абсолютные). exe не упакован. Запуск — `Darksiders2.exe` напрямую, полноэкранно (exclusive fullscreen D3D9).
+- Цель: перенести из DEBUG-сборки Xbox 360 (`<xbox project>\`, справочник) маленькую часть дебаг-меню:
+  1. **playerFly** — свободная камера; персонаж стоит; по клавише — телепорт игрока в точку камеры;
+  2. **Show triggers** — рисовать живые триггер-объёмы (на Xbox это патч Xenia через DebugRenderer игры; на PC DebugRenderer вырезан — рисуем сами).
+  Меню — своё, **в стиле Xbox-дебаг-меню**.
+- Способ: прокси-DLL `dinput8.dll` в папке игры → хуки (D3D9, ввод, функции игры) → ImGui-оверлей.
 
 ## 2. Схема работы
-- Пользователь планирует задачи с ассистентом-планировщиком (`brain\`) и приносит промпты. Номер задачи NN по порядку.
-- Длинная задача ведётся в `_claudework/notes/progress_NN.md` (запись после каждого этапа).
-- В конце задачи — `_claudework/notes/review_NN_<тема>.md` (на русском, плотно): что сделано · ключевые находки · что не сделано · допущения · проблемы и риски · технические данные · следующий шаг · вопросы ко мне. Старые ревью не менять.
-- В конце задачи обновить §7 и §8 этого файла и копию `_claudework/CLAUDE.md.copy`.
+- Пользователь планирует задачи с ассистентом-планировщиком (его память — `brain\`) и приносит **готовые промпты**. Номер задачи NN по порядку. Черновики будущих промптов лежат в `brain\prompts\` (только читать).
+- Длинная задача: `_claudework\notes\progress_NN.md`, запись после **каждого** этапа (что сделано, адреса, выводы, что осталось) — по нему продолжают после обрыва.
+- **В конце каждой задачи**: `_claudework\notes\review_NN_<тема>.md` (на русском, плотно, его читает планировщик): что сделано · ключевые находки · что не сделано / иначе · допущения и решения · проблемы и риски · технические данные · (чек-лист проверки в игре, если есть что проверять) · следующий шаг · вопросы ко мне. Старые ревью не менять.
+- Затем — обновить §8 «Текущее состояние» и §9 «Индекс» здесь, копию `_claudework\CLAUDE.md.copy`, и git по §10.
 - Метки: [ГИП] — гипотеза, [ПОДТВ] — проверено.
-- При каждой остановке перезаписывать `work_report.md` в корне (не коммитить; корень не git-репозиторий).
+- При каждой остановке перезаписывать `work_report.md` в корне проекта (дата, что сделано, состояние, что нужно от пользователя). Он вне git-репо — не коммитится.
+- Общение — по-русски. Тексты для пользователя-игрока (README для установки DLL и т.п.) — коротко, простыми словами.
 
 ## 3. Жёсткие правила
 - Всё своё — только в `_claudework\`. Исключения: этот `CLAUDE.md` и `work_report.md`.
-- **`brain\` — только читать.** Xbox-проект и `C:\Darksiders II\` (оригинал) — ничего не менять. Xbox Ghidra-проект открывать только `-readOnly` или работать с копией `_claudework\ghidra_xbox\`.
-- Ничего не ставить глобально; инструменты портативно в `_claudework\tools\`.
-- Папку игры менять можно, но: копия файла в `_claudework\backup\` + запись в `notes\game_changes.md` (что, зачем, откат). Если задача не разрешает — не менять.
-- **Игру не запускать.** Проверки в игре делает пользователь по инструкции.
-- Коммит/push — только после показа плана и подтверждения пользователя; теги — только по просьбе.
+- **`brain\` — только читать** (зеркалится скриптом в `_claudework\brain\`). Xbox-проект и `C:\Darksiders II\` (оригинал игры) — ничего не менять. Xbox Ghidra-проект — только копия `_claudework\ghidra_xbox\` или `-readOnly`.
+- Ничего не ставить глобально; инструменты — портативно в `_claudework\tools\`.
+- Папку игры `Darksiders II\` менять можно: перед изменением файла — копия в `_claudework\backup\`, запись в `notes\game_changes.md` (что, зачем, откат). Если промпт запрещает — не менять.
+- **Игру не запускать.** Проверки в игре делает пользователь по инструкции (чек-лист в ревью).
+- Не коммитить: файлы игры, `tools\` (кроме VERSIONS.md), `ghidra_project\`, `ghidra_xbox\`, `backup\`, `logs\`, `.obj/.lib/.exp/.pdb`. Файлы >50 МБ — только через Git LFS.
 
-## 4. Структура `_claudework\`
+## 4. Решения пользователя (2026-10-18)
+- **Коммиты и push разрешены**: в конце каждой задачи коммить, ставь тег `review-NN` и пушь **без отдельного вопроса** (схема §10). Для этого проекта это решение важнее общего правила из `~\.claude\CLAUDE.md` («план коммита и подтверждение»). `reset --hard`/переписывание истории — только по просьбе.
+- GitHub: **`git@github.com:billymooreq/Darksiders2-DebugMenu.git`** (приватный; ssh настроен). `gh` — `C:\Program Files\GitHub CLI\gh.exe` (может не быть в PATH, звать по полному пути; залогинен).
+- **Только клавиатура**, геймпад не нужен. Временные клавиши для тестов: **F1 — меню, F2 — playerFly** (потом поменяем).
+- Сторонний код разрешён: **MinHook, Dear ImGui** (в `_claudework\src\third_party\`, версии/лицензии — в `third_party\VERSIONS.md`).
+- Меню — в стиле Xbox-дебаг-меню (категории → пункты, подсветка строки, тёмная полупрозрачная панель).
+
+## 5. Структура `_claudework\` (= git-репозиторий)
 | путь | что |
 |---|---|
-| `notes\` | ревью, прогресс, заметки (индекс §8) |
-| `scripts\` | Python-инструменты, раннеры Ghidra/MSVC, `ghidra\*.java` |
-| `src\` | исходники (сейчас `proxy_dinput8\`) |
-| `build\` | собранные DLL (+ README для пользователя) |
-| `dumps\` | PE-сводки, строки, декомпиляция (`decomp_pc\`, `decomp_xbox\`) |
-| `ghidra_project\ds2pc` | Ghidra-проект PC-exe (не в git, ~300 МБ) |
+| `notes\` | ревью, прогресс, заметки (индекс §9) |
+| `src\` | исходники DLL (`proxy_dinput8\` — v0.1; далее v0.2 + `third_party\`) |
+| `build\` | собранные DLL + `README.md` для пользователя |
+| `scripts\` | Python-инструменты, раннеры Ghidra/MSVC, `ghidra\*.java`, `sync_brain.ps1` |
+| `dumps\` | PE-сводки, строки exe, декомпиляция (`decomp_pc\`, `decomp_xbox\`) |
+| `ghidra_export\Darksiders2.exe.gzf` | упакованный Ghidra-проект PC (LFS, ~90 МБ) |
+| `brain\` | зеркало `..\brain\` (не править вручную) |
+| `ghidra_project\ds2pc` | рабочий Ghidra-проект PC (не в git, ~300 МБ) |
 | `ghidra_xbox\ds2dbg` | копия Xbox Ghidra-проекта (не в git, 873 МБ) |
-| `tools\` | JDK 21, Ghidra 12.1.3 (+XEXLoaderWV), venv; не в git, см. `tools\VERSIONS.md` |
-| `logs\` | логи прокси-DLL из игры (не в git) |
-| `backup\` | копии файлов игры перед изменением (не в git) |
+| `tools\` | JDK 21, Ghidra 12.1.3 (+XEXLoaderWV), venv; не в git, восстановление — `tools\VERSIONS.md` |
+| `logs\` | логи DLL из игры (не в git) · `backup\` — копии файлов игры (не в git) |
 
-## 5. Инструменты и команды (из `_claudework\`)
-- 8.3-путь `_claudework`: `<repo>` (пробел в пути проекта ломает Ghidra/VMARGS). Игра: `<game dir>\`.
-- Python: `tools/venv/Scripts/python.exe -I` (pefile, capstone).
-- **Компилятор**: MSVC 2022 Build Tools (cl 19.44, x86) — уже в системе. `scripts\msvc32.bat <команда>` (vcvarsamd64_x86). Сборка прокси: `cmd //c '<repo>\src\proxy_dinput8\build.bat'`.
-- **Ghidra PC**: `cmd //c 'scripts\ghidra_run.bat -postScript Decomp.java <8.3>\dumps\decomp_pc\out.c <addr>…'` (адрес внутри функции; `!addr` — создать функцию, если Ghidra её не нашла). Также `XRefs.java`, `StrRefs.java`. Переимпорт: `scripts\ghidra_import.bat` (~19 мин).
-- **Ghidra Xbox (копия)**: `scripts\ghidra_xbox.bat -postScript Decomp.java …`.
-- **Быстрый x86-поиск без Ghidra**: `scripts/pcfind.py ref|calls|str|dis|dword|float …`; `after_call.py <VA>` — что зовут сразу после функции; `rtti_vt.py <имя>` — RTTI → vtable.
-- **Xbox-дизассемблер**: `scripts/ppcdis_xbox.py f|r|x|s …` (читает дампы Xbox-проекта), `xbox_words.py <addr> <n>`.
+## 6. Инструменты и команды (запускать из `_claudework\`)
+- **8.3-пути** (пробел в пути проекта ломает Ghidra и VMARGS): `_claudework` = `<repo>`, игра = `<game dir>`.
+- **Python**: `tools/venv/Scripts/python.exe -I` (pefile 2024.8.26, capstone 5.0.9).
+- **Компилятор**: MSVC 2022 Build Tools (cl 19.44, x86) + Windows SDK 10.0.26100 — **из системы**. Обёртка: `scripts\msvc32.bat <команда>` (vcvarsamd64_x86). Из bash: `cmd //c '<repo>\scripts\msvc32.bat cl /nologo …'` (пути — абсолютные 8.3; vcvars может сменить cwd). Флаги DLL: `/O2 /MT /LD`, `.def` для экспортов.
+- **Сборка прокси v0.1**: `cmd //c '<repo>\src\proxy_dinput8\build.bat'` → `build\proxy_dinput8\dinput8.dll`. Офлайн-проверка без игры: `src\proxy_dinput8\test_load.c` (собрать в scratchpad рядом с копией DLL, запустить `test_load.exe [wait]`).
+- **Ghidra PC** (проект `ghidra_project\ds2pc`, программа `Darksiders2.exe`): `cmd //c 'scripts\ghidra_run.bat -postScript Decomp.java <repo>\dumps\decomp_pc\out.c <addr>…'` (адрес может быть внутри функции; `!addr` — создать функцию, если Ghidra её не нашла — таких много). Также `XRefs.java`, `StrRefs.java`, `ExportGzf.java` (с `-readOnly`). Переимпорт с нуля: `scripts\ghidra_import.bat` (~19 мин). Из `.gzf`: Ghidra → Import File.
+- **Ghidra Xbox** (копия): `scripts\ghidra_xbox.bat -postScript Decomp.java …`.
+- **Быстрый x86-поиск** (часто быстрее Ghidra): `scripts/pcfind.py ref <VA>` (кто использует адрес как imm/disp), `calls <VA>` (прямые call/jmp), `str <текст>`, `dis <VA> [n]`, `dword <VA> [n]`, `float <v>`; `after_call.py <VA>` — что вызывают сразу после функции; `rtti_vt.py <имя RTTI>` — класс → vtable → ctor.
+- **Xbox-дизассемблер**: `scripts/ppcdis_xbox.py f|r|x|s …`, `xbox_words.py <addr> <n>` (читают дампы Xbox-проекта).
 
-## 6. Ключевые факты (подробно — `notes/xbox_pc_map.md`, `playerfly_xbox.md`)
-| что | PC | Xbox |
-|---|---|---|
-| рендер / ввод | D3D9 (Direct3DCreate9 IAT 0x01155730), Raw Input, XInput 1.3 (GetState IAT 0x011556D0), DInput8 | — |
-| дебаг-код | консоль/меню/DebugRenderer/OblivionGameDebug **вырезаны** (0/206 команд) | есть |
-| синглтон игры | `[0x0184E95C]`, `instance()` 0x004058CF | `[0x8376E9EC]` |
-| игрок / камера | `getPlayerActor` 0x004CDA8F (game+8 → vt[0x68]); `getCamera` 0x00745A0F (game+0x138) | 0x8242D9D0 / 0x82749DE0 |
-| пауза | `game->vt[0x68]` = 0x00B3C287 (счётчик +0xF8) | 0x82A67B10 |
-| EventManager | `getEventManager(world)` 0x007735E8 (World+0x118), список evm+0x14 {head,tail,count}, узел {next,obj} | 0x8292FA30 |
-| детекторы | vtable Detector 0x01269E40, TriggerRegion 0x012702A0; поля +0x58 World, +0x80 Shape, +0x90 Pos, +0xA0 Rot, +0xB0 Scale, +0xD4 тело, +0xD8 enabled — **как на Xbox** | то же |
-| vtable WorldObject | слоты **на 4 меньше**, чем на Xbox (getPos 0x38, getRot 0x40, getScale 0x48, onAdd 0x50) | 0x3C/0x44/0x4C/0x54 |
-| playerFly на Xbox | ctor 0x825B3790, execute 0x825B42C8, клавиша F (0x46), FlyCameraState тип 10, пауза + телепорт = Actor vt[0x38] setPosition(позиция камеры) | — |
-| прокси | `dinput8.dll` (статический импорт exe, не KnownDLL) | — |
+## 7. Ключевые факты PC (подробно — `notes\xbox_pc_map.md`, механизм Xbox — `notes\playerfly_xbox.md`)
+- **Рендер D3D9** [ПОДТВ логом: d3d9 загружен, d3d11/dxgi — нет]. IAT: `Direct3DCreate9` 0x01155730, `XInputGetState`(ord 2) 0x011556D0, `DirectInput8Create` 0x01155028 (игра его **не вызывает** [ПОДТВ]). Ввод: Raw Input (`RegisterRawInputDevices`/`GetRawInputData`) + `GetAsyncKeyState`; окно своё (`RegisterClassExA`/`CreateWindowExA`).
+- Дебаг-кода нет: консоль/206 команд/DebugRenderer/OblivionGameDebug/FlyCameraState вырезаны.
+- Методы — `__thiscall`; handle с refcount в `obj+4`, release = `0x00401017` (ECX=obj).
+- Игра: `Darksiders::instance()` **0x004058CF** → `[0x0184E95C]`; `getPlayerActor(out)` **0x004CDA8F**; `getCamera(out)` **0x00745A0F** (= game+0x138); `setPaused(bool)` = `game->vt[0x68]` **0x00B3C287** (счётчик +0xF8; так Xbox «замораживает» мир на время полёта).
+- Объекты мира: позиция WorldObject `+0x90`, getPos/getRot/getScale = vt **0x38/0x40/0x48** (0x008EF6B2/0x00A24AFB/0x00A24B3D). Базовый setPosition vt 0x34 = 0x00A7F942 пишет только +0x90 (**физику персонажа, вероятно, не двигает** — телепорт ещё искать).
+- Триггеры: `getEventManager(world=obj+0x58)` **0x007735E8** (World+0x118) → список `evm+0x14` {head,tail,count}, узел {next,obj}; DetectorObject vtable 0x01269E40, TriggerRegion 0x012702A0; поля +0x80 Shape, +0x90 Pos, +0xA0 Rot(°), +0xB0 Scale (полный размер), +0xD4 тело, +0xD8 enabled — **как на Xbox**. Фильтр: `vt[0x40]==0x00A24AFB && vt[0x48]==0x00A24B3D`.
+- **Поля совпадают с Xbox, а слоты vtable WorldObject на PC на 4 меньше** (у Game — совпадают). Каждый слот проверять.
+- Не найдено: матрица вида камеры, игровой тик, правильный телепорт.
 
-## 7. Текущее состояние (обновлять в конце задачи)
-- **Задача 01 (setup + recon) выполнена**: инструменты, разведка exe, разбор playerFly (Xbox), карта Xbox→PC, план архитектуры, минимальная прокси `build\proxy_dinput8\dinput8.dll` (офлайн-тест пройден, **в игре не проверена**).
-- Файлы игры не менялись.
-- Ждём от пользователя: проверку прокси в игре (лог `_claudework\logs\proxy_dinput8.log`).
-- Открыто: матрица вида камеры на PC; правильный телепорт актёра (базовый setPosition PC не трогает физику); игровой тик PC.
-- Коммиты: локальный git в `_claudework\`, remote нет.
+## 8. Текущее состояние (обновлять в конце задачи)
+- **Сделано:** задача 01 (setup + разведка + карта Xbox→PC + прокси v0.1), задача 02 (GitHub + эта память). Теги `review-01`, `review-02`.
+- **В игре проверено:** прокси v0.1 грузится, `exe identity: MATCH`, D3D9, игра работает нормально. `Darksiders II\dinput8.dll` = v0.1 (см. `notes\game_changes.md`).
+- **Следующий шаг — задача 03, DLL v0.2** (черновик промпта: `brain\prompts\prompt_03_menu_overlay.md`; пользователь принесёт итоговый): MinHook + Dear ImGui (DX9 + Win32) в `src\third_party\`; IAT-хук `Direct3DCreate9` → `IDirect3D9::CreateDevice` → хук `EndScene` или `Present` + `Reset`; subclass WndProc; блок ввода игры при открытом меню (`GetRawInputData` через IAT, проверить `GetAsyncKeyState`); **меню F1 в Xbox-стиле**; заготовки пунктов **playerFly (F2)** и **Show triggers**; экранная строка с позицией игрока (`0x004058CF` → `0x004CDA8F` → vt[0x38]) и камеры; лог `logs\dbgmenu.log`; все чтения памяти игры — с проверками и `__try/__except`. Результат — `build\dinput8.dll` + README и чек-лист проверки для пользователя.
+- Потом: 04 — playerFly (матрица вида камеры, телепорт), 05 — триггеры (обход EventManager, линии), 06 — полировка меню.
 
-## 8. Индекс заметок (`_claudework\notes\`)
+## 9. Индекс заметок (`_claudework\notes\`)
 | файл | о чём |
 |---|---|
-| `review_01_setup_recon.md` | итог задачи 01 (для планировщика) |
-| `progress_01.md` | журнал задачи 01 по этапам |
-| `playerfly_xbox.md` | механизм playerFly на Xbox: адреса, псевдокод, поля |
-| `xbox_pc_map.md` | таблица соответствий Xbox→PC, проверка смещений, фильтр детекторов |
+| `review_01_setup_recon.md` | итог 01: exe, остатки отладки, playerFly, карта, план, прокси |
+| `review_02_github_memory.md` | итог 02: репо, LFS, что исключено, эта память |
+| `progress_01.md` | журнал 01 по этапам |
+| `xbox_pc_map.md` | **таблица адресов Xbox→PC**, проверка смещений, фильтр детекторов |
+| `playerfly_xbox.md` | механизм playerFly на Xbox (адреса, псевдокод, скорости, поля) |
 | `plan_architecture.md` | архитектура: прокси, хуки, отрисовка, меню, playerFly, триггеры |
 | `game_changes.md` | журнал изменений в папке игры |
-| также | `build\proxy_dinput8\README.md` (инструкция пользователю), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` (206 команд vs PC) |
+| также | `README.md` (репо), `build\proxy_dinput8\README.md` (инструкция игроку), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
 
-## 9. Git
-- Репозиторий: `_claudework\` (локальный, без remote). `.gitignore`: tools (кроме VERSIONS.md), ghidra-проекты, backup, logs, .obj/.lib/.exp.
-- Коммит задачи: `NN: <тема>` — **только после подтверждения пользователя**. Теги — только по просьбе.
+## 10. Git — схема конца задачи NN (без вопроса пользователю)
+Репо: `_claudework\` → `origin` = `git@github.com:billymooreq/Darksiders2-DebugMenu.git`, ветка `main`. LFS: `ghidra_export/*.gzf`.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts\sync_brain.ps1   # brain\ -> _claudework\brain\
+# обновить ..\CLAUDE.md (§8, §9) и скопировать в _claudework\CLAUDE.md.copy
+git status                     # нет файлов игры, tools/, ghidra_project/, logs/; новых файлов >50 МБ вне LFS
+git add -A
+git commit -m "NN: <тема>"     # + строка Co-Authored-By
+git tag -a review-NN -m "NN: <тема>"   # аннотированный: --follow-tags пушит только такие
+git push --follow-tags
+git ls-remote origin           # должен показать refs/tags/review-NN
+```
+Ghidra-проект PC заметно изменился → перевыгрузить `.gzf`: `cmd //c 'scripts\ghidra_run.bat -readOnly -postScript ExportGzf.java <repo>\ghidra_export\Darksiders2.exe.gzf'` (~90 МБ квоты LFS за версию — не каждый раз).
+Откат: `git checkout review-NN -- <путь>` или `git switch -c tmp review-NN`.

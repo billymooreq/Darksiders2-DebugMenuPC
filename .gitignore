@@ -8,8 +8,18 @@ ghidra_xbox/
 *.rep/
 *.lock
 *.lock~
+# Ghidra headless logs
+ghidra_project/*.log
 # game file backups
 backup/
+# game files and full copies (never commit; ghidra_export/*.gzf is the only exception, LFS, private repo)
+*.exe
+*.upak
+*.obsp
+*.mnfst
+*.dsl
+worlds.bin
+worldnodes32.bin
 # build outputs and logs
 build/**/*.obj
 build/**/*.exp

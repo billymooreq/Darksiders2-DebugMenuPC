@@ -1,0 +1,4 @@
+# Packed Ghidra program (~90 MB, GitHub warns >50 MB) -> Git LFS
+ghidra_export/*.gzf filter=lfs diff=lfs merge=lfs -text
+*.dll binary
+*.png binary
