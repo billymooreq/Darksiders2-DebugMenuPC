@@ -1,0 +1,28 @@
+# portable tools (restore per tools/VERSIONS.md)
+tools/*
+!tools/VERSIONS.md
+# Ghidra projects (large, regenerable)
+ghidra_project/
+ghidra_xbox/
+*.gpr
+*.rep/
+*.lock
+*.lock~
+# game file backups
+backup/
+# build outputs and logs
+build/**/*.obj
+build/**/*.exp
+build/**/*.ilk
+build/**/*.pdb
+build/**/*.lib
+logs/
+# large dumps
+dumps/**/*.bin
+dumps/**/*.pe
+dumps/**/*.exe
+dumps/**/*.dll
+dumps/big/
+__pycache__/
+*.pyc
+dumps/**/run.log
