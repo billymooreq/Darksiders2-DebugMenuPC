@@ -39,8 +39,8 @@
 | путь | что |
 |---|---|
 | `notes\` | ревью, прогресс, заметки (индекс §9) |
-| `src\` | исходники DLL (`proxy_dinput8\` — v0.1; далее v0.2 + `third_party\`) |
-| `build\` | собранные DLL + `README.md` для пользователя |
+| `src\` | исходники DLL: `proxy_dinput8\` — v0.1; `dbgmenu\` — v0.2 (меню); `third_party\` — ImGui 1.91.9, MinHook 1.3.4 (`VERSIONS.md`) |
+| `build\` | `dinput8.dll` v0.2 + `README.md` для игрока; `proxy_dinput8\` — v0.1 |
 | `scripts\` | Python-инструменты, раннеры Ghidra/MSVC, `ghidra\*.java`, `sync_brain.ps1` |
 | `dumps\` | PE-сводки, строки exe, декомпиляция (`decomp_pc\`, `decomp_xbox\`) |
 | `ghidra_export\Darksiders2.exe.gzf` | упакованный Ghidra-проект PC (LFS, ~90 МБ) |
@@ -54,6 +54,7 @@
 - **8.3-пути** (пробел в пути проекта ломает Ghidra и VMARGS): `_claudework` = `<repo>`, игра = `<game dir>`.
 - **Python**: `tools/venv/Scripts/python.exe -I` (pefile 2024.8.26, capstone 5.0.9).
 - **Компилятор**: MSVC 2022 Build Tools (cl 19.44, x86) + Windows SDK 10.0.26100 — **из системы**. Обёртка: `scripts\msvc32.bat <команда>` (vcvarsamd64_x86). Из bash: `cmd //c '<repo>\scripts\msvc32.bat cl /nologo …'` (пути — абсолютные 8.3; vcvars может сменить cwd). Флаги DLL: `/O2 /MT /LD`, `.def` для экспортов.
+- **Сборка DLL v0.2 (меню)**: `cmd //c '<repo>\src\dbgmenu\build.bat'` → `build\dinput8.dll` (+pdb; obj в `build\obj\`). Офлайн-тест без игры: `src\dbgmenu\test\test_d3d.cpp` (собрать в scratchpad рядом с копией DLL; ставит `DBGMENU_TEST=1`, жмёт клавиши PostMessage, Reset/пересоздание устройства, снимки `shotN.bmp`).
 - **Сборка прокси v0.1**: `cmd //c '<repo>\src\proxy_dinput8\build.bat'` → `build\proxy_dinput8\dinput8.dll`. Офлайн-проверка без игры: `src\proxy_dinput8\test_load.c` (собрать в scratchpad рядом с копией DLL, запустить `test_load.exe [wait]`).
 - **Ghidra PC** (проект `ghidra_project\ds2pc`, программа `Darksiders2.exe`): `cmd //c 'scripts\ghidra_run.bat -postScript Decomp.java <repo>\dumps\decomp_pc\out.c <addr>…'` (адрес может быть внутри функции; `!addr` — создать функцию, если Ghidra её не нашла — таких много). Также `XRefs.java`, `StrRefs.java`, `ExportGzf.java` (с `-readOnly`). Переимпорт с нуля: `scripts\ghidra_import.bat` (~19 мин). Из `.gzf`: Ghidra → Import File.
 - **Ghidra Xbox** (копия): `scripts\ghidra_xbox.bat -postScript Decomp.java …`.
@@ -68,25 +69,31 @@
 - Объекты мира: позиция WorldObject `+0x90`, getPos/getRot/getScale = vt **0x38/0x40/0x48** (0x008EF6B2/0x00A24AFB/0x00A24B3D). Базовый setPosition vt 0x34 = 0x00A7F942 пишет только +0x90 (**физику персонажа, вероятно, не двигает** — телепорт ещё искать).
 - Триггеры: `getEventManager(world=obj+0x58)` **0x007735E8** (World+0x118) → список `evm+0x14` {head,tail,count}, узел {next,obj}; DetectorObject vtable 0x01269E40, TriggerRegion 0x012702A0; поля +0x80 Shape, +0x90 Pos, +0xA0 Rot(°), +0xB0 Scale (полный размер), +0xD4 тело, +0xD8 enabled — **как на Xbox**. Фильтр: `vt[0x40]==0x00A24AFB && vt[0x48]==0x00A24B3D`.
 - **Поля совпадают с Xbox, а слоты vtable WorldObject на PC на 4 меньше** (у Game — совпадают). Каждый слот проверять.
-- Не найдено: матрица вида камеры, игровой тик, правильный телепорт.
+- Камера `game+0x138` = **StateCamera** vtable 0x01199EA0: матрица `cam+0x80` (vt[0x3C]), направление vt[0x40] (−строка 2), **позиция vt[0x44] = `cam+0xB0`**. Вид/проекция: 0x00925969 (view = transpose(renderCam+0x40), D3DXMatrixPerspectiveFovLH); камера→рендер 0x00B3CD27.
+- Главный цикл 0x00B3D821 → **кадр игры 0x00B3D3E4** (ECX=game; Xbox-тик, похоже, встроен). Возможен отдельный поток рендера (`game+0x10 & 1`).
+- Телепорт: игровой `teleportTo` 0x00796B71 = `actor->vt[0x34](&pos)` + `vt[0x138](yaw)`. Подробно — `notes\camera_teleport_pc.md`.
+- Ввод: Raw Input клавиатуры без NOLEGACY (WM_KEYDOWN есть); WM_INPUT читается в WndProc игры (0x00403AF3 → 0x00913C78); `GetAsyncKeyState` только там же.
 
 ## 8. Текущее состояние (обновлять в конце задачи)
-- **Сделано:** задача 01 (setup + разведка + карта Xbox→PC + прокси v0.1), задача 02 (GitHub + эта память). Теги `review-01`, `review-02`.
-- **В игре проверено:** прокси v0.1 грузится, `exe identity: MATCH`, D3D9, игра работает нормально. `Darksiders II\dinput8.dll` = v0.1 (см. `notes\game_changes.md`).
-- **Следующий шаг — задача 03, DLL v0.2** (черновик промпта: `brain\prompts\prompt_03_menu_overlay.md`; пользователь принесёт итоговый): MinHook + Dear ImGui (DX9 + Win32) в `src\third_party\`; IAT-хук `Direct3DCreate9` → `IDirect3D9::CreateDevice` → хук `EndScene` или `Present` + `Reset`; subclass WndProc; блок ввода игры при открытом меню (`GetRawInputData` через IAT, проверить `GetAsyncKeyState`); **меню F1 в Xbox-стиле**; заготовки пунктов **playerFly (F2)** и **Show triggers**; экранная строка с позицией игрока (`0x004058CF` → `0x004CDA8F` → vt[0x38]) и камеры; лог `logs\dbgmenu.log`; все чтения памяти игры — с проверками и `__try/__except`. Результат — `build\dinput8.dll` + README и чек-лист проверки для пользователя.
-- Потом: 04 — playerFly (матрица вида камеры, телепорт), 05 — триггеры (обход EventManager, линии), 06 — полировка меню.
+- **Сделано:** 01 (setup + разведка + прокси v0.1), 02 (GitHub + память), **03 (DLL v0.2: меню F1 в Xbox-стиле, оверлей ImGui/D3D9 Present+Reset, блок ввода, showCameraPosition, статика для 04)**. Теги `review-01..03`.
+- **В игре проверено:** только v0.1. **v0.2 ещё не проверена в игре** — офлайн-тест пройден (`review_03` §6); в папке игры по-прежнему v0.1, пользователь ставит v0.2 сам по `build\README.md` и проходит чек-лист `review_03` §7.
+- **Следующий шаг:** получить `logs\dbgmenu.log` проверки v0.2 (совпадение позиций, vtable игрока/камеры, потоки Present/WndProc), затем **задача 04 — playerFly** по `notes\camera_teleport_pc.md` §5 (хук кадра 0x00B3D3E4, пауза vt[0x68], своя матрица в `StateCamera+0x80`, телепорт vt[0x34]+vt[0x138]); клавиши полёта — вопрос пользователю в `review_03` §9.
+- Потом: 05 — триггеры (обход EventManager, линии через вид/проекцию), 06 — полировка меню.
 
 ## 9. Индекс заметок (`_claudework\notes\`)
 | файл | о чём |
 |---|---|
 | `review_01_setup_recon.md` | итог 01: exe, остатки отладки, playerFly, карта, план, прокси |
 | `review_02_github_memory.md` | итог 02: репо, LFS, что исключено, эта память |
+| `review_03_menu_overlay.md` | итог 03: DLL v0.2, решения по хукам/вводу, **чек-лист проверки в игре** |
+| `progress_03.md` | журнал 03 (контрольная точка, офлайн-тест, найденная ошибка с refcount) |
+| `camera_teleport_pc.md` | **PC: StateCamera, вид/проекция, главный цикл/кадр, телепорт** — база для 04 |
 | `progress_01.md` | журнал 01 по этапам |
 | `xbox_pc_map.md` | **таблица адресов Xbox→PC**, проверка смещений, фильтр детекторов |
 | `playerfly_xbox.md` | механизм playerFly на Xbox (адреса, псевдокод, скорости, поля) |
 | `plan_architecture.md` | архитектура: прокси, хуки, отрисовка, меню, playerFly, триггеры |
 | `game_changes.md` | журнал изменений в папке игры |
-| также | `README.md` (репо), `build\proxy_dinput8\README.md` (инструкция игроку), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
+| также | `README.md` (репо), `build\README.md` (инструкция игроку v0.2), `build\proxy_dinput8\README.md` (v0.1), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
 
 ## 10. Git — схема конца задачи NN (без вопроса пользователю)
 Репо: `_claudework\` → `origin` = `git@github.com:billymooreq/Darksiders2-DebugMenu.git`, ветка `main`. LFS: `ghidra_export/*.gzf`.
