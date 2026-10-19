@@ -295,10 +295,15 @@ void Game_TestRender()
     if (!Fake()) return;
     GameMat m = s_fake.cam;
     Flight_RenderMatrix(m.m, (void *)0x00B3CD7E);
+    // then 0x00B3CD27 builds the projection (0x009055F7: RH perspective) and hands both to 0x00983AFC
+    float fov = 60.0f * 0.017453293f, aspect = 16.0f / 9.0f, zn = 10.0f, zf = 100000.0f;
+    float ys = cosf(fov * 0.5f) / sinf(fov * 0.5f), q = zf / (zf - zn);
+    float proj[16] = {ys / aspect, 0, 0, 0, 0, ys, 0, 0, 0, 0, -q, -1, 0, 0, -q * zn, 0};
+    Trig_OnRenderView(m.m, proj, (void *)0x00B3CE31);
 }
 
 // 1 = level loaded, 2 = level unloaded (player gone), 3 = camera lost, 4 = camera back,
-// 7 = the game moves the player by itself (respawn / scripted teleport)
+// 7 = the game moves the player by itself (respawn / scripted teleport), 12 = camera back at its first matrix
 void Game_TestControl(int cmd)
 {
     if (!Fake()) return;
@@ -313,6 +318,7 @@ void Game_TestControl(int cmd)
     case 3: s_fake.camLost = true; break;
     case 4: s_fake.camLost = false; break;
     case 7: s_fake.actorPos.x += 500; s_fake.actorPos.z = kFakeGround; s_fake.vz = 0; break;
+    case 12: s_fake.frames = 0; break;  // task 07: the camera back at its first matrix (next tick)
     }
     Log("test: control %d (loaded=%d camLost=%d pause=%d pos=(%.1f %.1f %.1f) vz=%.1f)", cmd, s_fake.loaded,
         s_fake.camLost, s_fake.pause, s_fake.actorPos.x, s_fake.actorPos.y, s_fake.actorPos.z, s_fake.vz);

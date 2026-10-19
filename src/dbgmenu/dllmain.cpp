@@ -172,11 +172,12 @@ extern "C" HRESULT WINAPI Proxy_DllUnregisterServer(void) { return p_DllUnregist
 extern "C" LPCVOID WINAPI Proxy_GetdfDIJoystick(void) { return p_GetdfDIJoystick ? p_GetdfDIJoystick() : NULL; }
 
 // Offline test harness only (does nothing in the game): 1..4, 7 fake game state, 5 = exception in the flight frame,
-// 6 = log the simulated cursor state.
+// 6 = log the simulated cursor state, 8..11, 13 triggers (projection check, empty / broken / normal fake list, exception).
 extern "C" void __cdecl DbgMenuTest(int cmd)
 {
     if (!g_testMode || g_gameMatch) return;
     if (cmd == 5) Flight_TestThrow();
     else if (cmd == 6) Cursor_TestLog("check");
+    else if ((cmd >= 8 && cmd <= 11) || cmd == 13 || cmd == 14) Trig_TestControl(cmd);
     else Game_TestControl(cmd);
 }

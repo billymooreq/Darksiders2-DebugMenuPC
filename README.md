@@ -6,8 +6,8 @@
 ## Структура
 | путь | что |
 |---|---|
-| `notes/` | ревью задач `review_NN_*.md`, журналы `progress_NN.md`, заметки: `xbox_pc_map.md` (адреса PC), `playerfly_xbox.md`, `plan_architecture.md`, `game_changes.md` |
-| `src/` | исходники DLL: `proxy_dinput8/` (v0.1), `dbgmenu/` (v0.2, меню; тест `dbgmenu/test/`), `third_party/` (ImGui, MinHook — `VERSIONS.md`) |
+| `notes/` | ревью задач `review_NN_*.md`, журналы `progress_NN.md`, заметки: `xbox_pc_map.md` (адреса PC), `playerfly_pc.md`, `triggers_pc.md`, `playerfly_xbox.md`, `plan_architecture.md`, `game_changes.md` |
+| `src/` | исходники DLL: `proxy_dinput8/` (v0.1), `dbgmenu/` (меню, сейчас v0.6: playerFly, Show triggers; тест `dbgmenu/test/`), `third_party/` (ImGui, MinHook — `VERSIONS.md`) |
 | `build/` | собранные DLL + `README.md` для пользователя (как поставить/убрать) |
 | `scripts/` | Python-инструменты (x86-поиск `pcfind.py`, PE/строки, RTTI, Xbox-дизассемблер), раннеры `ghidra_*.bat`, `msvc32.bat`, `ghidra/*.java`, `sync_brain.ps1` |
 | `dumps/` | PE-сводки, строки exe, декомпиляция (`decomp_pc/`, `decomp_xbox/`) |

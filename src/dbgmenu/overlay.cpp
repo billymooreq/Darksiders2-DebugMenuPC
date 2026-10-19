@@ -25,6 +25,7 @@ void Overlay_SetDevice(IDirect3DDevice9 *dev, HWND hwnd)
 }
 
 IDirect3DDevice9 *Overlay_BoundDevice() { return s_dx9 ? s_dev : NULL; }
+IDirect3DDevice9 *Overlay_MainDevice() { return s_mainDev; }
 
 static void ApplyXboxStyle()
 {
@@ -164,6 +165,8 @@ static void FrameInner(IDirect3DDevice9 *dev)
         ImGui_ImplWin32_NewFrame();
         ImGui::GetIO().DisplaySize = ImVec2((float)d.Width, (float)d.Height);  // back buffer, not client rect
         ImGui::NewFrame();
+        Trig_Draw2D();  // background draw list: under the menu panels
+        Trig_DrawStatus();
         Menu_Draw();
         Info_Draw();
         ImGui::Render();

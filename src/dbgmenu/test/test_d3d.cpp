@@ -83,6 +83,25 @@ static void Focus(bool on)
     PostMessageA(g_wnd, on ? WM_SETFOCUS : WM_KILLFOCUS, 0, 0);
 }
 
+// task 07: a dark "wall" over the left half of the screen at depth 0.5 (writes the depth buffer)
+static void DrawOccluder()
+{
+    struct V { float x, y, z, rhw; DWORD c; };
+    float w = (float)g_pp.BackBufferWidth * 0.5f, h = (float)g_pp.BackBufferHeight;
+    V v[4] = {{0, 0, 0.5f, 1, 0xFF283C50}, {w, 0, 0.5f, 1, 0xFF283C50}, {0, h, 0.5f, 1, 0xFF283C50},
+              {w, h, 0.5f, 1, 0xFF283C50}};
+    g_dev->SetFVF(D3DFVF_XYZRHW | D3DFVF_DIFFUSE);
+    g_dev->SetRenderState(D3DRS_ZENABLE, TRUE);
+    g_dev->SetRenderState(D3DRS_ZWRITEENABLE, TRUE);
+    g_dev->SetRenderState(D3DRS_ZFUNC, D3DCMP_LESSEQUAL);
+    g_dev->SetRenderState(D3DRS_LIGHTING, FALSE);
+    g_dev->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+    g_dev->SetTexture(0, NULL);
+    g_dev->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_SELECTARG1);
+    g_dev->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_DIFFUSE);
+    g_dev->DrawPrimitiveUP(D3DPT_TRIANGLESTRIP, 2, v, sizeof(V));
+}
+
 typedef void(__cdecl *DbgMenuTest_t)(int);
 static DbgMenuTest_t g_ctl;
 static void Ctl(int cmd)
@@ -112,7 +131,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1160; frame++) {
+    for (int frame = 1; frame <= 1270; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -271,9 +290,49 @@ int main()
         case 1140: Say("menu: hover jump -> game"); Key(VK_F1); Key(VK_LEFT); break;
         case 1142: Snapshot("shot10.bmp"); break;
         case 1144: Key(VK_F1); break;
+        // ---- task 07: Show triggers (fake EventManager in triggers.cpp, camera back at (100 200 300) looking +X) ----
+        // from frame 1150 the "game" draws a depth occluder over the left half (z = 0.5) before Present
+        case 1150: Say("07a: F3 -> triggers on, through walls"); Ctl(12); Key(VK_F3); break;
+        case 1156: Ctl(8); break;
+        case 1158: Snapshot("shot11.bmp"); break;
+        case 1160: Say("07b: playerFly: strafe left + mouse; the triggers stay in the world"); Key(VK_F2); break;
+        case 1163: KeyDown('A'); Mouse(300, 300); break;
+        case 1164: Mouse(330, 290); break;
+        case 1175: KeyUp('A'); Ctl(8); break;
+        case 1177: Snapshot("shot12.bmp"); break;
+        case 1180: Key(VK_F2); break;
+        case 1183: Say("07c: menu Graphics -> triggers depth: depth"); Ctl(12); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); break;
+        case 1185: Key(VK_RETURN); Key(VK_DOWN); Key(VK_RIGHT); break;
+        case 1187: Snapshot("shot13.bmp"); break;
+        case 1188: Key(VK_F1); break;
+        case 1195: Snapshot("shot14.bmp"); break;
+        case 1198: Say("07d: device Reset in depth mode"); printf("Reset -> %08lX\n", g_dev->Reset(&g_pp)); break;
+        case 1205: Snapshot("shot15.bmp"); break;
+        case 1208: Say("07e: empty list, broken list, normal"); Ctl(9); break;
+        case 1211: Ctl(8); Ctl(10); break;
+        case 1214: Ctl(8); Ctl(11); break;
+        case 1217: Ctl(8); break;
+        case 1220: Say("07f: show disabled off"); Key(VK_F1); Key(VK_DOWN); Key(VK_LEFT); break;
+        case 1222: Key(VK_F1); break;
+        case 1226: Snapshot("shot16.bmp"); break;
+        case 1228: Say("07f: show disabled on, back to through walls"); Key(VK_F1); Key(VK_RIGHT); Key(VK_UP); Key(VK_LEFT); break;
+        case 1230: Key(VK_F1); break;
+        case 1234: Say("07g: exception while collecting -> triggers off"); Ctl(13); break;
+        case 1238: Say("07g: F3 -> on again"); Key(VK_F3); break;
+        case 1242: Snapshot("shot17.bmp"); Ctl(8); break;
+        case 1245: Say("07h: 8000 fake triggers, through walls (timing)"); Ctl(14); break;
+        case 1250: Ctl(8); Snapshot("shot18.bmp"); break;
+        case 1252: Say("07h: 8000 fake triggers, depth"); Key(VK_F1); Key(VK_RIGHT); break;
+        case 1253: Key(VK_F1); break;
+        case 1256: Ctl(8); Snapshot("shot19.bmp"); break;
+        case 1258: Ctl(11); Key(VK_F1); Key(VK_LEFT); break;
+        case 1259: Key(VK_F1); break;
+        case 1262: Say("07i: F3 -> off"); Key(VK_F3); break;
+        case 1266: Snapshot("shot20.bmp"); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();
+        if (frame >= 1150) DrawOccluder();
         g_dev->EndScene();
         g_dev->Present(NULL, NULL, NULL, NULL);
         Sleep(10);

@@ -1,6 +1,7 @@
 // Hooks: IAT (Direct3DCreate9, GetRawInputData, ShowCursor/ClipCursor/SetCursorPos) -> MinHook on d3d9.dll methods
-// (IDirect3D9::CreateDevice, IDirect3DDevice9::Present/Reset/Release, IDirect3DSwapChain9::Present) and on two
-// game functions (frame 0x00B3D3E4, Darksiders::getCameraMatrix 0x004CD9DA).
+// (IDirect3D9::CreateDevice, IDirect3DDevice9::Present/Reset/Release/SetRenderTarget/SetDepthStencilSurface/Clear,
+// IDirect3DSwapChain9::Present) and on game functions (frame 0x00B3D3E4, Darksiders::getCameraMatrix 0x004CD9DA;
+// task 07: render view setup 0x00983AFC, HUD pass 0x00B3B8D2).
 #include "common.h"
 #include "MinHook.h"
 #include <intrin.h>
@@ -74,7 +75,11 @@ static HRESULT STDMETHODCALLTYPE hkPresent(IDirect3DDevice9 *dev, const RECT *sr
                                            const RGNDATA *dirty)
 {
     if (++t_presentDepth == 1) {
-        if (!g_frameHooked) Flight_Frame();  // fallback (offline test / frame hook refused)
+        if (!g_frameHooked) {  // fallback (offline test / frame hook refused)
+            Trig_Frame();
+            Flight_Frame();
+        }
+        Trig_OnPresent(dev);  // depth mode, if the HUD pass did not draw this frame
         Overlay_OnFrame(dev);
     }
     HRESULT hr = o_Present(dev, src, dst, wnd, dirty);
@@ -87,8 +92,12 @@ static HRESULT STDMETHODCALLTYPE hkSCPresent(IDirect3DSwapChain9 *sc, const RECT
 {
     if (++t_presentDepth == 1) {
         IDirect3DDevice9 *dev = NULL;
-        if (!g_frameHooked) Flight_Frame();
+        if (!g_frameHooked) {
+            Trig_Frame();
+            Flight_Frame();
+        }
         if (SUCCEEDED(sc->GetDevice(&dev)) && dev) {
+            Trig_OnPresent(dev);
             Overlay_OnFrame(dev);
             t_inRelease++;  // our own reference, not the game's
             dev->Release();
@@ -112,6 +121,33 @@ static HRESULT STDMETHODCALLTYPE hkReset(IDirect3DDevice9 *dev, D3DPRESENT_PARAM
             pp ? pp->BackBufferWidth : 0, pp ? pp->BackBufferHeight : 0, pp ? pp->BackBufferFormat : 0,
             pp ? pp->Windowed : -1, pp ? pp->FullScreen_RefreshRateInHz : 0, hr);
     return hr;
+}
+
+// task 07: render target / depth / Clear calls, logged for one frame when the triggers depth mode is switched on
+typedef HRESULT(STDMETHODCALLTYPE *SetRT_t)(IDirect3DDevice9 *, DWORD, IDirect3DSurface9 *);
+typedef HRESULT(STDMETHODCALLTYPE *SetDS_t)(IDirect3DDevice9 *, IDirect3DSurface9 *);
+typedef HRESULT(STDMETHODCALLTYPE *Clear_t)(IDirect3DDevice9 *, DWORD, const D3DRECT *, DWORD, D3DCOLOR, float, DWORD);
+static SetRT_t o_SetRT;
+static SetDS_t o_SetDS;
+static Clear_t o_Clear;
+
+static HRESULT STDMETHODCALLTYPE hkSetRT(IDirect3DDevice9 *dev, DWORD i, IDirect3DSurface9 *s)
+{
+    Trig_D3DEvent(TE_SETRT, dev, i, (DWORD)(UINT_PTR)_ReturnAddress(), s);
+    return o_SetRT(dev, i, s);
+}
+
+static HRESULT STDMETHODCALLTYPE hkSetDS(IDirect3DDevice9 *dev, IDirect3DSurface9 *s)
+{
+    Trig_D3DEvent(TE_SETDS, dev, 0, (DWORD)(UINT_PTR)_ReturnAddress(), s);
+    return o_SetDS(dev, s);
+}
+
+static HRESULT STDMETHODCALLTYPE hkClear(IDirect3DDevice9 *dev, DWORD n, const D3DRECT *r, DWORD flags, D3DCOLOR c,
+                                         float z, DWORD st)
+{
+    Trig_D3DEvent(TE_CLEAR, dev, flags, (DWORD)(UINT_PTR)_ReturnAddress(), NULL);
+    return o_Clear(dev, n, r, flags, c, z, st);
 }
 
 static ULONG PeekRefs(IDirect3DDevice9 *dev)
@@ -148,6 +184,9 @@ static void HookDevice(IDirect3DDevice9 *dev)
     HookVfunc(dev, 2, (void *)hkRelease, (void **)&o_Release, "IDirect3DDevice9::Release");
     HookVfunc(dev, 16, (void *)hkReset, (void **)&o_Reset, "IDirect3DDevice9::Reset");
     HookVfunc(dev, 17, (void *)hkPresent, (void **)&o_Present, "IDirect3DDevice9::Present");
+    HookVfunc(dev, 37, (void *)hkSetRT, (void **)&o_SetRT, "IDirect3DDevice9::SetRenderTarget");
+    HookVfunc(dev, 39, (void *)hkSetDS, (void **)&o_SetDS, "IDirect3DDevice9::SetDepthStencilSurface");
+    HookVfunc(dev, 43, (void *)hkClear, (void **)&o_Clear, "IDirect3DDevice9::Clear");
     IDirect3DSwapChain9 *sc = NULL;
     if (SUCCEEDED(dev->GetSwapChain(0, &sc)) && sc) {
         HookVfunc(sc, 3, (void *)hkSCPresent, (void **)&o_SCPresent, "IDirect3DSwapChain9::Present");
@@ -191,6 +230,8 @@ static IDirect3D9 *WINAPI hkDirect3DCreate9(UINT sdk)
 #define PC_GAME_CAMMAT  0x004CD9DAu  // Darksiders vt[0x7C] getCameraMatrix(out) = copy of (game+0x138)+0xC0
 #define PC_VT_GAME      0x0116E230u
 #define PC_SETPAUSED    0x00B3C287u
+#define PC_RENDER_VIEW  0x00983AFCu  // task 07 (notes/triggers_pc.md)
+#define PC_HUD_PASS     0x00B3B8D2u
 // camera A of v0.3 (hooks of StateCamera tick 0x005B8599 / update 0x005B5D33 + writes of cam+0x80/+0xC0) was
 // removed in task 05: the user chose B; it is in git history (tag review-04).
 
@@ -203,8 +244,30 @@ static GetMat_t o_GetCamMatrix;
 
 static void __fastcall hkFrame(void *game)
 {
+    Trig_Frame();    // task 07: trigger snapshot (before the frame, like the flight)
     Flight_Frame();  // between frames: requests, pause, teleport, camera matrix for this frame
     o_Frame(game);
+}
+
+// task 07: 0x00983AFC __thiscall setupView(renderView, camMat*, proj*, fov, aspect, near?, far?) (ret 0x18) - the
+// matrices of the frame; 0x00B3B8D2 __fastcall hudPass(game) - 2D/HUD after the 3D scene
+typedef void *(__fastcall *RenderView_t)(void *rv, void *edx, const float *cam, const float *proj, float a, float b,
+                                         float c, float d);
+typedef void(__fastcall *Hud_t)(void *game);
+static RenderView_t o_RenderView;
+static Hud_t o_Hud;
+
+static void *__fastcall hkRenderView(void *rv, void *edx, const float *cam, const float *proj, float a, float b,
+                                     float c, float d)
+{
+    if (cam && proj) Trig_OnRenderView(cam, proj, _ReturnAddress());
+    return o_RenderView(rv, edx, cam, proj, a, b, c, d);
+}
+
+static void __fastcall hkHud(void *game)
+{
+    Trig_OnHud();
+    o_Hud(game);
 }
 
 static void *__fastcall hkGetCamMatrix(void *game, void *edx, float *out)
@@ -243,6 +306,13 @@ static void InstallGameHooks()
     if (!g_frameHooked) Log("WARNING: no frame hook -> playerFly runs from Present (camera one frame late)");
     HookGame(PC_GAME_CAMMAT, kGetMat, sizeof(kGetMat), (void *)hkGetCamMatrix, (void **)&o_GetCamMatrix,
              "Darksiders::getCameraMatrix");
+    static const BYTE kAlignedPro[] = {0x53, 0x8B, 0xDC, 0x51, 0x51, 0x83, 0xE4, 0xF0};  // both functions start so
+    if (!HookGame(PC_RENDER_VIEW, kAlignedPro, sizeof(kAlignedPro), (void *)hkRenderView, (void **)&o_RenderView,
+                  "renderView setup (triggers)"))
+        Log("WARNING: no view hook -> Show triggers cannot draw");
+    if (!HookGame(PC_HUD_PASS, kAlignedPro, sizeof(kAlignedPro), (void *)hkHud, (void **)&o_Hud,
+                  "HUD pass (triggers depth)"))
+        Log("WARNING: no HUD hook -> triggers depth mode draws at Present");
 }
 
 bool Hooks_Install()

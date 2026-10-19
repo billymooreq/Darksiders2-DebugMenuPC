@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.5 (task 06)"
+#define DBGMENU_VERSION "dbgmenu v0.6 (task 07)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -58,6 +58,7 @@ IDirect3DDevice9 *Overlay_BoundDevice();      // device the ImGui DX9 backend ho
 void Overlay_FreeResources(IDirect3DDevice9 *dev); // ImGui D3DPOOL_DEFAULT objects (recreated lazily)
 void Overlay_DeviceDying(IDirect3DDevice9 *dev); // game drops its last reference -> free ours first
 bool Overlay_Internal();  // this thread is inside an ImGui backend call that releases device references
+IDirect3DDevice9 *Overlay_MainDevice();          // last device created by the game (NULL after it died)
 
 // ---- menu.cpp ----
 extern bool g_showCameraPosition;
@@ -123,6 +124,24 @@ void Game_LogActorMethods(void *actor);
 void Game_TestTick();                               // test mode: fake game objects (+ simple gravity)
 void Game_TestRender();                             // test mode: fake renderer asks game->vt[0x7C]
 void Game_TestControl(int cmd);
+
+// ---- triggers.cpp: Show triggers (task 07, notes/triggers_pc.md) ----
+enum { TD_WALLS = 0, TD_DEPTH = 1 };
+enum { TE_SETRT = 1, TE_SETDS, TE_CLEAR, TE_VIEW, TE_HUD, TE_PRESENT };
+extern bool g_showTriggers;        // Graphics -> Show triggers (F3)
+extern int g_trigDepthMode;        // Graphics -> triggers depth: through walls / depth
+extern bool g_trigShowDisabled;    // Graphics -> show disabled (default on)
+void Trig_Frame();                 // game thread, once per game frame (before the original frame): collect
+void Trig_Toggle();                // F3 / menu
+void Trig_OnRenderView(const float *camMat, const float *proj, void *caller);  // hook 0x00983AFC
+void Trig_OnHud();                 // hook of the HUD pass 0x00B3B8D2 (entry): depth mode draws here
+void Trig_OnPresent(IDirect3DDevice9 *dev);  // before the overlay: depth mode fallback
+void Trig_Draw2D();                // overlay frame (ImGui): through walls
+void Trig_DrawStatus();            // overlay frame (ImGui): "triggers: N drawn / M total"
+void Trig_StartCapture();          // log one frame of render target / depth / Clear calls
+void Trig_D3DEvent(int type, IDirect3DDevice9 *dev, DWORD a, DWORD b, void *p);  // device hooks -> timeline
+void Trig_TestControl(int cmd);    // test mode: 8 projection check, 9 empty list, 10 broken list, 11 normal,
+                                   // 13 exception in the next collection, 14 8000 objects (timing)
 
 // ---- flight.cpp: playerFly ----
 extern bool g_hoverAfterTeleport;  // menu General -> hover after teleport (default on)

@@ -28,11 +28,14 @@ struct Command {
 };
 
 static void Cmd_PlayerFly();
-static void Cmd_ShowTriggers();
+static void On_ShowTriggers();
+static void On_TrigDepth();
+static void On_ShowDisabled();
 static void On_ShowCameraPosition();
 static void On_Hover();
 
 static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
+static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // order of TD_WALLS / TD_DEPTH
 
 // Command registry (like the Xbox console registry): one line = one menu item; categories in order of appearance.
 static const Command g_commands[] = {
@@ -48,8 +51,14 @@ static const Command g_commands[] = {
      CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_hoverJumpMode, kHoverJumpNames, 2},
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
      CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, NULL},
-    {"Graphics", "Show triggers", "Draw trigger volumes (EventManager detectors). Task 05.",
-     CT_ACTION, Cmd_ShowTriggers, NULL, NULL, 0, 0, 0, NULL},
+    {"Graphics", "Show triggers", "Draw the live trigger volumes (detectors of the loaded level): magenta = "
+     "TriggerRegion, cyan = other detectors, gray = switched off.",
+     CT_TOGGLE, On_ShowTriggers, &g_showTriggers, NULL, 0, 0, 0, "F3"},
+    {"Graphics", "triggers depth", "through walls: the lines are on top of everything. depth: walls hide the lines "
+     "(drawn into the 3D scene before the HUD).",
+     CT_ENUM, On_TrigDepth, NULL, NULL, 0, 0, 0, NULL, &g_trigDepthMode, kTrigDepthNames, 2},
+    {"Graphics", "show disabled", "Also draw the switched-off triggers (gray, paler).",
+     CT_TOGGLE, On_ShowDisabled, &g_trigShowDisabled, NULL, 0, 0, 0, NULL},
     {"Menu", "Panel opacity", "Background opacity of the menu panel.",
      CT_FLOAT, NULL, NULL, &s_panelAlpha, 0.30f, 1.00f, 0.05f, NULL},
     {"Menu", "Text scale", "Size of the menu text.",
@@ -95,11 +104,19 @@ void Menu_Status(const char *fmt, ...)
 
 static bool StatusActive() { return s_status[0] && (LONG)(s_statusUntil - GetTickCount()) > 0; }
 
-bool Menu_WantsDraw() { return g_menuOpen || g_showCameraPosition || StatusActive() || g_flying || Flight_Hovering(); }
+bool Menu_WantsDraw()
+{
+    return g_menuOpen || g_showCameraPosition || StatusActive() || g_flying || Flight_Hovering() || g_showTriggers;
+}
 
 // ---- commands ----
 static void Cmd_PlayerFly() { Flight_RequestToggle(); }  // done by the next game frame
-static void Cmd_ShowTriggers() { Menu_Status("Show triggers: not implemented yet"); }
+static void On_ShowTriggers() { Menu_Status("Show triggers %s", g_showTriggers ? "on" : "off"); }
+static void On_TrigDepth()
+{
+    if (g_trigDepthMode == TD_DEPTH) Trig_StartCapture();  // one frame of render target calls into the log
+}
+static void On_ShowDisabled() { Menu_Status("show disabled %s", g_trigShowDisabled ? "on" : "off"); }
 static void On_ShowCameraPosition() { Menu_Status("Show Camera Position %s", g_showCameraPosition ? "on" : "off"); }
 static void On_Hover() { Menu_Status("hover after teleport %s", g_hoverAfterTeleport ? "on" : "off"); }
 
@@ -118,6 +135,7 @@ static void Execute(const Command *c)
     case CT_ENUM:
         *c->choice = (*c->choice + 1) % c->numNames;
         Menu_Status("%s: %s", c->name, c->names[*c->choice]);
+        if (c->action) c->action();
         break;
     }
 }
@@ -127,6 +145,7 @@ static void Change(const Command *c, int dir)
     if (c->type == CT_ENUM) {
         *c->choice = (*c->choice + c->numNames + dir) % c->numNames;
         Menu_Status("%s: %s", c->name, c->names[*c->choice]);
+        if (c->action) c->action();
     } else if (c->type == CT_TOGGLE) {
         bool v = dir > 0;
         if (*c->flag != v) {
@@ -149,6 +168,10 @@ void Menu_HandleKey(int vk)
     }
     if (vk == VK_F2) {  // the WndProc already requested the flight toggle
         Log("menu: F2 -> playerFly");
+        return;
+    }
+    if (vk == VK_F3) {  // the WndProc already toggled the triggers
+        Log("menu: F3 -> Show triggers %s", g_showTriggers ? "on" : "off");
         return;
     }
     if (!g_menuOpen) return;

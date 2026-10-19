@@ -4,7 +4,7 @@
 //   - Raw Input (the game reads it in its WndProc via GetRawInputData, 0x00913C78) is filtered in the
 //     IAT hook: presses become a no-op key (VKey 0xFF, break), mouse motion/wheel/button-downs are zeroed.
 // A key the game saw going down always gets its release, and a press we swallowed never leaks a release,
-// so no key stays "stuck" after the menu closes. F1/F2 (our hotkeys) never reach the game.
+// so no key stays "stuck" after the menu closes. F1/F2/F3 (our hotkeys) never reach the game.
 // Flight (task 04): the same block while flying; the flight reads held keys and mouse motion from what we see
 // here (s_held, raw mouse deltas), Enter / left button request the teleport.
 // Task 05: focus tracking (WM_ACTIVATEAPP / WM_ACTIVATE / WM_KILLFOCUS / WM_SETFOCUS + foreground check): losing
@@ -160,7 +160,7 @@ void Input_UpdateBlock()
     InterlockedExchange(&g_inputBlocked, (g_menuOpen || g_flying) ? 1 : 0);
 }
 
-static bool IsHotkey(int vk) { return vk == VK_F1 || vk == VK_F2; }
+static bool IsHotkey(int vk) { return vk == VK_F1 || vk == VK_F2 || vk == VK_F3; }
 static bool IsMenuKey(int vk)
 {
     return vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_RETURN || vk == VK_ESCAPE ||
@@ -208,6 +208,7 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
             if (!repeat) {
                 if (vk == VK_F1 && (g_overlayReady || g_menuOpen)) Input_SetMenuOpen(!g_menuOpen);
                 if (vk == VK_F2) Flight_RequestToggle();  // executed by the next game frame
+                if (vk == VK_F3 && g_overlayReady) Trig_Toggle();  // task 07: Show triggers
                 PushKey(vk);
             }
             KeyMake(s_legacy, vk, true);
