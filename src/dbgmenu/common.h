@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.8 (task 09)"
+#define DBGMENU_VERSION "dbgmenu v0.8.1 (task 09)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -162,6 +162,7 @@ void Flight_RequestTime(int mode);         // task 09: T (-1 = switch) / menu (0
 void Flight_RequestAttach(int mode);       // task 09: R (-1 = switch) / menu (0 = off, 1 = on) while flying
 bool Flight_TimeFrozen();                  // flying with our pause
 bool Flight_Attached();                    // the player is carried in front of the camera
+bool Flight_AttachedPos(GameVec *out);     // v0.8.1: where the carried player is (status line)
 void Flight_RequestAbort(const char *why); // real failures only (not focus loss, not Reset)
 void Flight_OnUnload(bool processExit);
 void Flight_TestThrow();                   // test mode: exception in the next flight frame

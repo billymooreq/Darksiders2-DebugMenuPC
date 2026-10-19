@@ -131,7 +131,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1520; frame++) {
+    for (int frame = 1; frame <= 1540; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -384,7 +384,7 @@ int main()
         case 1448: Snapshot("shot36.bmp"); break;
         case 1450: Say("09g: menu in flight: freeze time in flight off -> time runs at once"); Key(VK_F1); Key(VK_RETURN); break;
         case 1452: Key(VK_F1); break;
-        case 1455: Say("09h: T frozen, R carried, Enter: the usual teleport, pause back to 0"); Key('T'); break;
+        case 1455: Say("09h: T frozen, R carried, Enter: (v0.8.1) the carried player stays there, pause back to 0"); Key('T'); break;
         case 1458: Key('R'); break;
         case 1461: Key(VK_RETURN); break;
         case 1470: KeyDown(VK_SPACE); break;
@@ -399,7 +399,12 @@ int main()
         case 1500: Ctl(5); break;
         case 1505: Say("09k: detector enter/exit log (fake body)"); Ctl(15); break;
         case 1510: Say("09l: T / R outside the flight reach the game"); Key('T'); Key('R'); break;
-        case 1515: Say("final cursor state: released"); Ctl(6); break;
+        case 1515: Say("09m: F2, R, left click: (v0.8.1) the carried player stays there"); Key(VK_F2); break;
+        case 1518: Key('R'); break;
+        case 1522: Snapshot("shot37.bmp"); break;
+        case 1524: Click(); break;
+        case 1530: Key(VK_SPACE); break;
+        case 1535: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

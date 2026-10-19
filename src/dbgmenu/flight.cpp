@@ -156,6 +156,12 @@ bool Flight_Hovering() { return s_hover.active; }
 bool Flight_NoFocus() { return g_flying && s_frozen; }
 bool Flight_TimeFrozen() { return g_flying && s_pausedByUs; }
 bool Flight_Attached() { return g_flying && s_att.active; }
+bool Flight_AttachedPos(GameVec *out)
+{
+    if (!g_flying || !s_att.active) return false;
+    *out = s_att.last;
+    return true;
+}
 
 void Flight_RequestTime(int mode)
 {
@@ -1003,18 +1009,26 @@ static void FinishAt(const GameVec &target, const GameVec &dir, const char *how)
     s_probe.stage = 0;
 }
 
+// the carried player stays where he is (hover, camera behind him)
+static void StayCarried(const char *how)
+{
+    GameVec p = s_att.last, dir = {cosf(s_yaw), sinf(s_yaw), 0, 0};
+    FinishAt(p, dir, how);
+}
+
+// Enter / click: to the camera point; with the player carried (v0.8.1, user's wish) the same as F2 - he stays
 static void Teleport()
 {
+    if (s_att.active) return StayCarried("Enter/LMB - the carried player stays there");
     GameVec target = {s_pos[0], s_pos[1], s_pos[2], 0}, dir = {s_fwd[0], s_fwd[1], s_fwd[2], 0};
     FinishAt(target, dir, "teleport");
 }
 
-// F2 / menu: with the player carried he stays where he is (hover, camera behind him), else back to the game camera
+// F2 / menu: with the player carried he stays where he is, else back to the game camera
 static void ToggleOff()
 {
     if (!s_att.active) return Exit("F2 / menu", false);
-    GameVec p = s_att.last, dir = {cosf(s_yaw), sinf(s_yaw), 0, 0};
-    FinishAt(p, dir, "F2 - the carried player stays there");
+    StayCarried("F2 - the carried player stays there");
 }
 
 // T / menu freeze time in flight; R / menu attach player (game thread, flying, objects validated)

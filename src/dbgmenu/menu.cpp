@@ -49,13 +49,13 @@ static const Command g_commands[] = {
     // ---- playerFly ----
     {"playerFly", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
      "Space/C up/down, Enter or left click: teleport the player here, R: carry the player, T: freeze / run time, "
-     "F2: back (a carried player stays where he is).",
+     "F2: back. A carried player stays where he is on F2, Enter or click.",
      CT_ACTION, Cmd_PlayerFly, NULL, NULL, 0, 0, 0, "F2"},
     {"playerFly", "freeze time in flight", "On: the game is paused while you fly (as before). Off: the world, enemies "
      "and triggers keep running. T switches it during a flight.",
      CT_TOGGLE, On_FreezeTime, &g_flyFreezeTime, NULL, 0, 0, 0, NULL},
     {"playerFly", "attach player", "The flight starts with the player carried in front of the camera: he passes "
-     "through walls, does not fall and touches triggers. R switches it during a flight.",
+     "through walls, does not fall and touches triggers; Enter, click or F2 leave him there. R switches it in flight.",
      CT_TOGGLE, On_Attach, &g_flyAttach, NULL, 0, 0, 0, NULL},
     {"playerFly", "attach distance", "How far in front of the camera the carried player is.",
      CT_FLOAT, NULL, NULL, &g_attachDist, 100.0f, 600.0f, 50.0f, NULL, NULL, NULL, 0, "%.0f"},
@@ -410,10 +410,13 @@ static void DrawFlyStatus()
         ImGui::SameLine();
         ImGui::TextColored(frozen ? kStatus : kOn, "time: %s", frozen ? "frozen" : "running");
         ImGui::SameLine();
-        if (Flight_Attached()) ImGui::TextColored(kOn, " attached: dist %.0f ", g_attachDist);
+        GameVec ap;
+        bool attached = Flight_AttachedPos(&ap);
+        if (attached) ImGui::TextColored(kOn, " attached: dist %.0f  player (%.0f %.0f %.0f) ", g_attachDist, ap.x, ap.y, ap.z);
         else ImGui::Text(" free ");
         ImGui::SameLine();
         ImGui::TextDisabled(g_menuOpen ? "[menu open: flight stopped, F1 closes the menu]"
+                            : attached ? "[R let go \xC2\xB7 T time \xC2\xB7 Enter/LMB/F2 - leave the player here]"
                                        : "[R attach \xC2\xB7 T time \xC2\xB7 Enter/LMB teleport \xC2\xB7 F2 exit]");
     }
     ImGui::End();
