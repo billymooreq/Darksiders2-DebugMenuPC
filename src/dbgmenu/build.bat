@@ -1,5 +1,5 @@
 @echo off
-rem Build dbgmenu dinput8.dll v0.4 (x86, /MT) into _claudework\build\dinput8.dll
+rem Build dbgmenu dinput8.dll v0.5 (x86, /MT) into _claudework\build\dinput8.dll
 setlocal
 set "W=<repo>"
 set "S=%W%\src\dbgmenu"

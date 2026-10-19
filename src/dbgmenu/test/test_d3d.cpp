@@ -112,7 +112,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 520 + 110; frame++) {
+    for (int frame = 1; frame <= 1160; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -218,6 +218,59 @@ int main()
         case 495: Say("left click: teleport + exit (hover off)"); Click(); break;
         case 505: Say("click after the flight must reach the game"); Click(); break;
         case 510: Say("final cursor state: released"); Ctl(6); break;
+        // ---- task 06: jump from the hover (the fake game: ground / fall with a second chance / jump / double) ----
+        // Space is held 2 frames: the fake game and our air phase look at held keys, not at the message queue
+        case 520: Say("menu: hover after teleport -> on, select hover jump (game)"); Key(VK_F1); Key(VK_RETURN); Key(VK_DOWN); break;
+        case 522: Key(VK_F1); break;
+        case 525: Say("06a: enter, fly up, teleport -> hover high above the ground"); Key(VK_F2); break;
+        case 528: KeyDown(VK_SPACE); break;
+        case 560: KeyUp(VK_SPACE); break;
+        case 563: Key(VK_RETURN); break;
+        case 580: Say("06a: hovering, Space -> the game jumps from the hover"); KeyDown(VK_SPACE); break;
+        case 582: KeyUp(VK_SPACE); break;
+        case 600: Say("06a: in the jump, Space -> double jump"); KeyDown(VK_SPACE); break;
+        case 602: KeyUp(VK_SPACE); break;
+        case 660: Say("06b: hover, W releases -> falls; Space in the fall -> jump; Space -> double jump"); Key(VK_F2); break;
+        case 663: KeyDown(VK_SPACE); break;
+        case 695: KeyUp(VK_SPACE); break;
+        case 698: Key(VK_RETURN); break;
+        case 710: KeyDown('W'); break;
+        case 712: KeyUp('W'); break;
+        case 725: KeyDown(VK_SPACE); break;
+        case 727: KeyUp(VK_SPACE); break;
+        case 740: KeyDown(VK_SPACE); break;
+        case 742: KeyUp(VK_SPACE); break;
+        case 800: Say("menu: hover jump -> direct"); Key(VK_F1); Key(VK_RIGHT); break;
+        case 802: Key(VK_F1); break;
+        case 805: Say("06c: direct: hover, Space -> our changeState one frame later"); Key(VK_F2); break;
+        case 808: KeyDown(VK_SPACE); break;
+        case 840: KeyUp(VK_SPACE); break;
+        case 843: Key(VK_RETURN); break;
+        case 855: KeyDown(VK_SPACE); break;
+        case 857: KeyUp(VK_SPACE); break;
+        case 875: Say("06c: direct: in the jump, Space -> double jump (the game)"); KeyDown(VK_SPACE); break;
+        case 877: KeyUp(VK_SPACE); break;
+        case 930: Say("06d: direct: hover, W -> falls; Space in the fall -> our jump; Space -> double"); Key(VK_F2); break;
+        case 933: KeyDown(VK_SPACE); break;
+        case 965: KeyUp(VK_SPACE); break;
+        case 968: Key(VK_RETURN); break;
+        case 980: KeyDown('W'); break;
+        case 982: KeyUp('W'); break;
+        case 995: KeyDown(VK_SPACE); break;
+        case 997: KeyUp(VK_SPACE); break;
+        case 1010: KeyDown(VK_SPACE); break;
+        case 1012: KeyUp(VK_SPACE); break;
+        case 1070: Say("06e: F2 during the air phase: no jump help after the flight"); Key(VK_F2); break;
+        case 1073: KeyDown(VK_SPACE); break;
+        case 1100: KeyUp(VK_SPACE); break;
+        case 1103: Key(VK_RETURN); break;
+        case 1110: KeyDown('W'); break;
+        case 1112: KeyUp('W'); break;
+        case 1115: Key(VK_F2); break;
+        case 1120: Key(VK_F2); break;
+        case 1140: Say("menu: hover jump -> game"); Key(VK_F1); Key(VK_LEFT); break;
+        case 1142: Snapshot("shot10.bmp"); break;
+        case 1144: Key(VK_F1); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

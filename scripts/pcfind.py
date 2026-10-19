@@ -4,6 +4,7 @@
   pcfind.py str <text>           VA of NUL-terminated ASCII string, then its refs
   pcfind.py dis <VA hex> [n]     disassemble n instructions from VA
   pcfind.py dword <VA hex> [n]   dump n dwords
+  pcfind.py data <VA hex>        every place in the whole image holding VA as a dword (vtable slots)
 """
 import struct, sys
 import capstone, pefile
@@ -98,6 +99,13 @@ elif cmd == "dword":
     for k in range(n):
         v = struct.unpack_from("<I", IMG, va - BASE + 4 * k)[0]
         print(f"{va + 4 * k:08X} +{4 * k:03X}: {v:08X}")
+elif cmd == "data":
+    # every place in the image (not only code) holding the dword VA: vtable slots, tables
+    pat = struct.pack("<I", int(sys.argv[2], 16))
+    i = IMG.find(pat)
+    while i >= 0:
+        print(f"    {BASE + i:08X} {sect(BASE + i)}")
+        i = IMG.find(pat, i + 1)
 elif cmd == "calls":
     # direct E8 rel32 calls / E9 jmps to target
     tgt = int(sys.argv[2], 16)

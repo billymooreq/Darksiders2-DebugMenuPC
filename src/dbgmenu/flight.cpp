@@ -16,6 +16,14 @@
 //   - the picture blends from the free camera into the game camera in 0.3 s (same vt[0x7C] hook);
 //   - hover: the game runs, but before every frame the player is put back at the teleport point and his vertical
 //     speed (+0x3B8) is zeroed; the first game control key/button lets him go (the key reaches the game).
+// Task 06, jump from the hover (notes/playerfly_pc.md §6): the hovering player is in the PlayerFall state, which
+// jumps only through its "second chance" (state+0xAC seconds left, set only when the fall starts from a walk/run).
+//   - hover jump = game (default): every hover frame +0xAC is kept armed, so Space makes the game itself do its
+//     normal jump from the fall (setState OnSecondChanceJump), then its double jump; after a release by another key
+//     it stays armed during that whole fall (a jump in the air, then the double jump);
+//   - hover jump = direct: +0xAC stays 0, we call changeState(OnSecondChanceJump) ourselves one frame after Space;
+//   - both: the fallen height (+0xA0, "long fall" / landing) and the "stuck" timer (+0xB0) are 0 while hovering,
+//     so the fall counts from the release point; the jump starts with horizontal speed 0 (+0xA8).
 #include "common.h"
 #include <math.h>
 #include <float.h>
@@ -23,6 +31,7 @@
 #include <stdlib.h>
 
 bool g_hoverAfterTeleport = true;
+int g_hoverJumpMode = HJ_GAME;
 volatile LONG g_flying;
 
 static const float kBaseSpeed = 375.0f * 2.0f;  // Xbox FlyCameraState: 375 * dt * 2.0 units per second
@@ -32,6 +41,9 @@ static const float kMaxDt = 0.1f;
 static const float kBlendTime = 0.3f;            // free camera -> game camera after the teleport
 static const float kHoverMovedByGame = 40.0f;    // the game moved the player that far by itself: stop holding
 static const DWORD kClickAfterFocusMs = 300;     // a click that gives the focus back is not a teleport
+static const float kChanceArm = 0.5f;            // PlayerFall +0xAC kept at this (s); the game takes dt per frame
+static const DWORD kAirMaxMs = 20000;            // the jump stays available that long after a release at most
+static const float kDirectJumpVz = 550.0f;       // direct, no jump state id at all: vz for ~150 units (g ~ 1000)
 
 static volatile LONG s_reqToggle, s_reqTeleport, s_reqAbort, s_testThrow;
 static const char *volatile s_abortWhy;
@@ -75,7 +87,20 @@ static struct {
     int frames, setPosCalls;
     float maxDrop, maxVz;
     bool vzWarned;
+    void *lastState;          // the player's state object seen last frame (changes are logged)
+    int stateLogs, armOk, armNotFall;
+    int stateFrames, forceTries;  // frames in the current state; attempts to put an in-air state into the fall
 } s_hover;
+
+// after the hover let go: the jump from the air stays available while the player is in that same fall state
+static struct {
+    bool active;
+    void *game, *actor, *state;
+    int key, frames, armOk;
+    DWORD t0;
+    bool pending, spacePrev, zeroHspeed;  // direct: jump this frame; the press came from the hover (speed 0)
+    bool vzUsed;                          // direct without a jump state id: the vertical speed only once
+} s_air;
 
 // the game camera 1 s after the teleport: did it keep looking where the free camera looked?
 static struct {
@@ -247,30 +272,6 @@ static float Elapsed(const LARGE_INTEGER &t0)
 }
 
 // ---- hover ----
-static void HoverStop(const char *why)
-{
-    if (!s_hover.active) return;
-    s_hover.active = false;
-    Log("hover: stopped (%s) after %.1f s, %d frames", why, (GetTickCount() - s_hover.t0) / 1000.0f, s_hover.frames);
-    Menu_Status("hover: off (%s)", why);
-}
-
-static void HoverStart(void *game, void *actor, const GameVec &target)
-{
-    float vz = 0;
-    bool vzOk = Game_ActorGetVz(actor, &vz);
-    memset(&s_hover, 0, sizeof(s_hover));
-    s_hover.active = true;
-    s_hover.game = game;
-    s_hover.actor = actor;
-    s_hover.target = target;
-    s_hover.t0 = s_hover.lastLog = GetTickCount();
-    Input_HoverArm();  // the teleport press itself (Enter / LMB still held) never releases the hover
-    s_rel.active = false;
-    Log("hover: START at (%.2f %.2f %.2f), vertical speed +0x3B8 = %s%.2f", target.x, target.y, target.z,
-        vzOk ? "" : "(unknown class) ", vz);
-}
-
 static const char *KeyName(int vk)
 {
     static char buf[32];
@@ -289,6 +290,139 @@ static const char *KeyName(int vk)
     return buf;
 }
 
+static const char *JumpModeName() { return g_hoverJumpMode == HJ_DIRECT ? "direct" : "game"; }
+
+// one log line about the player's movement state
+static const char *MoveLine(void *actor, GameMove *out = NULL)
+{
+    static char buf[512];
+    GameMove m;
+    Game_PlayerMove(actor, &m);
+    Game_MoveStr(m, buf, sizeof(buf));
+    if (out) *out = m;
+    return buf;
+}
+
+// while hovering (and at the release): fall height and "stuck" timer 0, the jump from here starts with
+// horizontal speed 0; game mode: the second chance armed, direct mode: disarmed (we jump ourselves)
+static bool HoverPrepFall(void *a, const GameMove &m)
+{
+    if (!m.ok || !m.fall) return false;
+    return Game_FallArm(a, m.state, g_hoverJumpMode == HJ_GAME ? kChanceArm : 0.0f, true, 0.0f);
+}
+
+static void AirStop(const char *why)
+{
+    if (!s_air.active) return;
+    s_air.active = false;
+    Log("hover: jump from the air no longer kept (%s) after %lu ms, %d frames, armed %d times", why,
+        GetTickCount() - s_air.t0, s_air.frames, s_air.armOk);
+}
+
+static void HoverStop(const char *why)
+{
+    AirStop("hover stopped");
+    if (!s_hover.active) return;
+    s_hover.active = false;
+    Log("hover: stopped (%s) after %.1f s, %d frames", why, (GetTickCount() - s_hover.t0) / 1000.0f, s_hover.frames);
+    Menu_Status("hover: off (%s)", why);
+}
+
+static void HoverStart(void *game, void *actor, const GameVec &target)
+{
+    float vz = 0;
+    bool vzOk = Game_ActorGetVz(actor, &vz);
+    AirStop("new hover");
+    memset(&s_hover, 0, sizeof(s_hover));
+    s_hover.active = true;
+    s_hover.game = game;
+    s_hover.actor = actor;
+    s_hover.target = target;
+    s_hover.t0 = s_hover.lastLog = GetTickCount();
+    Input_HoverArm();  // the teleport press itself (Enter / LMB still held) never releases the hover
+    s_rel.active = false;
+    GameMove m;
+    const char *ms = MoveLine(actor, &m);
+    s_hover.lastState = m.state;
+    Log("hover: START at (%.2f %.2f %.2f), vertical speed +0x3B8 = %s%.2f, hover jump = %s", target.x, target.y,
+        target.z, vzOk ? "" : "(unknown class) ", vz, JumpModeName());
+    Log("hover:   %s", ms);
+}
+
+// after a release: keep the jump from the air available while the player stays in that fall state
+static void AirStart(void *game, void *actor, const GameMove &m, int key)
+{
+    memset(&s_air, 0, sizeof(s_air));
+    if (!m.ok) {
+        Log("hover: WARNING player state unknown at the release -> no jump help after it");
+        return;
+    }
+    s_air.active = true;
+    s_air.game = game;
+    s_air.actor = actor;
+    s_air.state = m.state;
+    s_air.key = key;
+    s_air.t0 = GetTickCount();
+    s_air.spacePrev = key == VK_SPACE;  // that press is handled below (direct) or by the game itself
+    s_air.pending = key == VK_SPACE && g_hoverJumpMode == HJ_DIRECT;
+    s_air.zeroHspeed = s_air.pending;
+    if (!m.fall)
+        Log("hover: NOTE the player is not in PlayerFall at the release (vt %08X): the game decides about jumps itself",
+            (unsigned)(UINT_PTR)m.stateVt);
+}
+
+// direct mode: our own jump = changeState(OnSecondChanceJump of the fall, else OnJump of the state)
+static void DirectJump(void *a, const GameMove &m)
+{
+    int id = m.fall && m.chanceJump != -1 ? m.chanceJump : m.onJump;
+    if (id == -1) {
+        if (s_air.vzUsed) {
+            Log("hover: direct jump: no jump state id, the vertical speed was already given once -> nothing");
+            return;
+        }
+        s_air.vzUsed = true;
+        bool ok = Game_ActorSetVz(a, kDirectJumpVz);
+        Log("hover: direct jump: no jump state id in this state -> vz = %.0f %s", kDirectJumpVz, ok ? "set" : "FAILED");
+        return;
+    }
+    if (s_air.zeroHspeed) Game_ActorSetHspeed(a, 0);  // like the game: +0x274 = speed at the fall start (0 here)
+    bool ok = Game_StateChange(a, m.state, id);
+    Log("hover: direct jump: changeState(%d) %s | now %s", id, ok ? "ok" : "FAILED", MoveLine(a));
+}
+
+static void AirFrame()
+{
+    if (!s_air.active) return;
+    void *g = NULL, *a = NULL;
+    if (!Game_GetGame(&g) || g != s_air.game || !Game_GetActor(g, &a) || a != s_air.actor)
+        return AirStop("player lost or changed");
+    GameMove m;
+    if (!Game_PlayerMove(a, &m)) return AirStop("player state unreadable");
+    s_air.frames++;
+    DWORD el = GetTickCount() - s_air.t0;
+    if (m.state != s_air.state) {  // jumped, landed, attacked...
+        char buf[512];
+        Game_MoveStr(m, buf, sizeof(buf));
+        Log("hover: after release %lu ms: the player state changed -> %s", el, buf);
+        return AirStop("state changed");
+    }
+    if (el > kAirMaxMs) return AirStop("time limit");
+    if (g_hoverJumpMode == HJ_GAME) {
+        // the jump keeps the speed the player has now (the game gives +0xA8 back to +0x274)
+        if (m.fall && Game_FallArm(a, m.state, kChanceArm, false, m.hspeed > 0 ? m.hspeed : 0.0f)) s_air.armOk++;
+        return;
+    }
+    bool space = !g_inputBlocked && Input_KeyHeld(VK_SPACE), edge = space && !s_air.spacePrev;
+    s_air.spacePrev = space;
+    if (s_air.pending) {  // one frame after the press: the jump state does not see that press again
+        s_air.pending = false;
+        DirectJump(a, m);
+        s_air.zeroHspeed = false;
+        return;
+    }
+    if (edge) s_air.pending = true;
+}
+
 // before every game frame while hovering: the player back at the point, vertical speed 0
 static void HoverFrame()
 {
@@ -304,17 +438,25 @@ static void HoverFrame()
     float dist = sqrtf(dx * dx + dy * dy + dz * dz);
     int key = Input_HoverKey();
     if (key) {  // let go: from the teleport point with vertical speed 0; the key reaches the game this frame
+        char before[512];
+        GameMove m0, m1;
+        Game_PlayerMove(a, &m0);
+        Game_MoveStr(m0, before, sizeof(before));
         if (dist > 0.001f && dist < kHoverMovedByGame) Game_ActorSetPos(a, &s_hover.target);
         Game_ActorSetVz(a, 0);
+        HoverPrepFall(a, m0);
         GameVec q;
         float vz2 = 0;
         Game_ActorGetPos(a, &q);
         Game_ActorGetVz(a, &vz2);
         Log("hover: RELEASED by %s after %.1f s, %d frames: pos=(%.2f %.2f %.2f) vz %.2f -> %.2f | hold stats: setPos %d, "
-            "max drop/frame %.3f, max |vz| before reset %.2f",
+            "max drop/frame %.3f, max |vz| before reset %.2f | hover jump = %s, fall armed %d frames, not in fall %d",
             KeyName(key), (GetTickCount() - s_hover.t0) / 1000.0f, s_hover.frames, q.x, q.y, q.z, vz, vz2,
-            s_hover.setPosCalls, s_hover.maxDrop, s_hover.maxVz);
+            s_hover.setPosCalls, s_hover.maxDrop, s_hover.maxVz, JumpModeName(), s_hover.armOk, s_hover.armNotFall);
+        Log("hover:   before: %s", before);
+        Log("hover:   after:  %s", MoveLine(a, &m1));
         s_hover.active = false;
+        AirStart(g, a, m1, key);
         s_rel.active = true;
         s_rel.game = g;
         s_rel.actor = a;
@@ -340,11 +482,37 @@ static void HoverFrame()
         s_hover.vzWarned = true;
         Log("hover: WARNING vertical speed unknown for this actor class -> holding by position only");
     }
+    GameMove m;
+    if (Game_PlayerMove(a, &m)) {
+        if (m.state != s_hover.lastState) {
+            s_hover.lastState = m.state;
+            s_hover.stateFrames = 0;
+            if (s_hover.stateLogs++ < 10) {
+                char buf[512];
+                Game_MoveStr(m, buf, sizeof(buf));
+                Log("hover: the player state changed at frame %d -> %s", s_hover.frames, buf);
+            }
+        }
+        s_hover.stateFrames++;
+        // teleported in a jump (or another in-air state): held at the point it never ends by itself, and only the
+        // fall can jump -> the state's own transition OnFall (what it does when it starts falling)
+        if (!m.fall && (m.descFlags & 1) && m.onFall != -1 && s_hover.stateFrames >= 10 && s_hover.forceTries < 3) {
+            s_hover.forceTries++;
+            bool ok = Game_StateChange(a, m.state, m.onFall);
+            Log("hover: the player hangs in an in-air state (vt %08X) for %d frames -> changeState(OnFall %d) %s",
+                (unsigned)(UINT_PTR)m.stateVt, s_hover.stateFrames, m.onFall, ok ? "ok" : "FAILED");
+            if (ok) Game_PlayerMove(a, &m);
+        }
+        if (HoverPrepFall(a, m)) s_hover.armOk++;
+        else s_hover.armNotFall++;
+    }
     DWORD now = GetTickCount();
     if (now - s_hover.lastLog >= 2000) {
         s_hover.lastLog = now;
-        Log("hover: %.1f s, %d frames, setPos %d, max drop/frame %.3f, max |vz| before reset %.2f",
-            (now - s_hover.t0) / 1000.0f, s_hover.frames, s_hover.setPosCalls, s_hover.maxDrop, s_hover.maxVz);
+        Log("hover: %.1f s, %d frames, setPos %d, max drop/frame %.3f, max |vz| before reset %.2f, fall armed %d, not in "
+            "fall %d",
+            (now - s_hover.t0) / 1000.0f, s_hover.frames, s_hover.setPosCalls, s_hover.maxDrop, s_hover.maxVz,
+            s_hover.armOk, s_hover.armNotFall);
     }
 }
 
@@ -370,6 +538,7 @@ static void CamProbe()
         s_camProbe.fwd[2], yawDiff);
 }
 
+
 static void ReleaseProbe()
 {
     if (!s_rel.active) return;
@@ -389,6 +558,7 @@ static void ReleaseProbe()
     Game_ActorGetVz(a, &vz);
     Log("hover: after release %s (%lu ms): pos=(%.2f %.2f %.2f) moved (%.2f %.2f %.2f) vz=%.2f", label, el, p.x, p.y,
         p.z, p.x - s_rel.p0.x, p.y - s_rel.p0.y, p.z - s_rel.p0.z, vz);
+    Log("hover:   %s", MoveLine(a));
 }
 
 // ---- enter / exit ----
@@ -651,7 +821,6 @@ static void Probe()
 // ---- per frame ----
 static void FrameInner()
 {
-    Game_TestTick();
     Probe();
     ReleaseProbe();
     CamProbe();
@@ -662,6 +831,7 @@ static void FrameInner()
     }
     if (!g_flying) {
         InterlockedExchange(&s_reqTeleport, 0);
+        AirFrame();  // before HoverFrame: starts the frame after a release
         HoverFrame();
         return;
     }
@@ -710,6 +880,7 @@ void Flight_Frame()
         FrameInner();
     } __except (FrameFilter(GetExceptionInformation())) {
         if (g_flying) SafeExit("exception in the flight frame");
+        s_air.active = false;
         if (s_hover.active) {
             s_hover.active = false;
             Log("hover: stopped (exception)");
@@ -717,6 +888,7 @@ void Flight_Frame()
     }
     Cursor_Update();
     __try {
+        Game_TestTick();  // the fake game frame runs after us, like the real one after the hook of 0x00B3D3E4
         Game_TestRender();
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
@@ -725,6 +897,7 @@ void Flight_Frame()
 void Flight_OnUnload(bool processExit)
 {
     s_hover.active = false;
+    s_air.active = false;
     s_blend.active = false;
     if (!g_flying) return;
     if (processExit) Log("fly: process exit during flight (the game is closing, pause left as is)");

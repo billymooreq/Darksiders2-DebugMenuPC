@@ -2,6 +2,7 @@
 // Every step is in its own __try; a vtable must lie in the exe image and a method in .text before we call it.
 #include "common.h"
 #include <math.h>
+#include <stdio.h>
 
 #define PC_GAME_PTR       0x0184E95Cu  // Darksiders* singleton (instance() 0x004058CF = lazy init + read)
 #define PC_GET_PLAYER      0x004CDA8Fu  // Handle* __thiscall getPlayerActor(Darksiders*, Handle* out): game+8 -> vt[0x68]
@@ -153,6 +154,36 @@ void Game_Read(GameInfo *gi)
 #define PC_CAM_RESET       0x005B7348u  // StateCamera::reset (script resetCamera 0x004E572F): matrix behind target yaw
 #define PC_CAM_TO_DEFAULT  0x005D5B1Au  // cdecl (cam, float, float): transition to the default state cam+0x160
 
+// task 06 (notes/playerfly_pc.md §6): the player's state machine. Every state is an object {vt, ?, +8 desc,
+// +0xC actor}; actor+0x310 is the current one (0x007824EB writes it). state->vt[0x54] 0x006CDB14 = bool
+// changeState(int id): id -> handle (0x00622374) -> actor->vt[0x260] setState. The desc holds the transition ids
+// (+0x54 OnActionComplete, +0x58 OnFall, +0x5C OnIdle, +0x60 OnJump, +0x64 OnMove, +0x68 OnSwim, +0xC0 OnLand;
+// scripts/propmap.py). The base input handler 0x008246A0 jumps with vt[0x8C] = changeState(desc->OnJump) when
+// input +0x81 (actor+0x961) is set; PlayerFall (vt 0x011E92A0) has OnJump = none and its own "second chance"
+// in 0x006D6B79: while state+0xAC > 0 (seconds left, -= dt) and the jump is pressed -> actor+0x274 = state+0xA8,
+// setState(desc+0x130 OnSecondChanceJump). +0xAC is set on entering the fall from the allowed states only
+// (desc+0x12C SecondChanceJumpDuration), so after a teleport it is 0 - that is why v0.4 could not jump.
+#define OFS_PLAYER_CTRL    0x30C        // character controller: on ground = +0x109 && +0x45 && !+0x46 (0x005029AD)
+#define OFS_PLAYER_STATE   0x310
+#define OFS_PLAYER_HSPEED  0x274
+#define OFS_PLAYER_FLAGS   0x308
+#define OFS_PLAYER_JUMPIN  0x961        // input struct actor+0x8E0, +0x81 = jump
+#define OFS_ST_DESC        0x08
+#define OFS_ST_ACTOR       0x0C
+#define VT_ST_CHANGE       0x54
+#define PC_ST_CHANGE       0x006CDB14u
+#define OFS_DESC_ONFALL    0x58
+#define OFS_DESC_ONJUMP    0x60
+#define OFS_DESC_FLAGS     0xA8
+#define PC_VT_PLAYERFALL   0x011E92A0u
+#define OFS_FALL_DIST      0xA0         // fallen height (update 0x006D703E; > desc+0x134 -> OnFall "long fall")
+#define OFS_FALL_HSPEED    0xA8         // actor+0x274 at the fall start, given back to the second chance jump
+#define OFS_FALL_CHANCE    0xAC
+#define OFS_FALL_STUCK     0xB0         // time with ~0 fall rate; too long -> actor+0x278 FallStrength, +0x308 |= 0x8000
+#define OFS_FDESC_CHANCE   0x12C
+#define OFS_FDESC_CHJUMP   0x130
+#define OFS_FDESC_FALLDIST 0x134
+
 typedef void(__fastcall *SetVec_t)(void *self, void *edx, const GameVec *v);
 typedef void(__fastcall *SetFloat_t)(void *self, void *edx, float f);
 typedef void(__fastcall *SetBool_t)(void *self, void *edx, int b);
@@ -177,6 +208,11 @@ static void *Method(void *obj, int ofs)
 }
 
 // ---- offline test: fake objects (DBGMENU_TEST=1 and not the game) ----
+// task 06: a tiny player state machine like the game's: ground -> (no ground) fall without a second chance ->
+// Space with fall.chance > 0 -> jump (OnSecondChanceJump) -> Space -> double jump; landing -> ground.
+enum { FK_GROUND, FK_FALL, FK_JUMP, FK_DOUBLE };
+static const char *const kFakeStName[] = {"ground", "fall", "jump", "double jump"};
+static const int kFakeIdFall = 100, kFakeIdJump = 101, kFakeIdDouble = 102;
 static struct {
     int frames;
     bool loaded, camLost;
@@ -184,9 +220,23 @@ static struct {
     float actorYaw, vz;
     GameMat cam;
     int pause, resets;
+    int st, stObj;                 // state kind, index of the current "state object" (a new one on every change)
+    float chance, fallDist, stuck, fallH, hspeed;
+    bool spacePrev, jumpIn;
 } s_fake;
-static const float kFakeGround = 250.0f, kFakeGravity = 1000.0f, kFakeDt = 1.0f / 60.0f;
+static int s_fakeStates[8];        // addresses only: the state objects
+static const float kFakeGround = 250.0f, kFakeGravity = 1000.0f, kFakeDt = 1.0f / 60.0f, kFakeJumpVz = 550.0f;
 static bool Fake() { return g_testMode && !g_gameMatch; }
+
+static void FakeSetState(int st, const char *why)
+{
+    Log("test: state %s -> %s (%s) at z=%.1f vz=%.1f", kFakeStName[s_fake.st], kFakeStName[st], why,
+        s_fake.actorPos.z, s_fake.vz);
+    s_fake.st = st;
+    s_fake.stObj = (s_fake.stObj + 1) % 8;
+    if (st == FK_FALL) s_fake.chance = s_fake.fallDist = s_fake.stuck = 0, s_fake.fallH = s_fake.hspeed;
+    if (st == FK_JUMP || st == FK_DOUBLE) s_fake.vz = kFakeJumpVz;
+}
 
 void Game_TestTick()
 {
@@ -198,14 +248,44 @@ void Game_TestTick()
     if (s_fake.loaded && s_fake.actorPos.x == 0 && s_fake.actorPos.y == 0 && s_fake.actorPos.z == 0) {
         s_fake.actorPos.x = 100; s_fake.actorPos.y = 200; s_fake.actorPos.z = kFakeGround;
     }
-    // the fake "game frame": gravity while not paused (the hover hold runs before it, like before 0x00B3D3E4)
-    if (s_fake.loaded && !s_fake.pause && (s_fake.actorPos.z > kFakeGround || s_fake.vz > 0)) {
+    // the fake "game frame": gravity and the states while not paused (the hover hold runs before it, like
+    // before 0x00B3D3E4); the game sees Space only when we do not block its input
+    if (!s_fake.loaded || s_fake.pause) return;
+    bool space = !g_inputBlocked && Input_KeyHeld(VK_SPACE), edge = space && !s_fake.spacePrev;
+    s_fake.spacePrev = space;
+    s_fake.jumpIn = edge;
+    float z0 = s_fake.actorPos.z;
+    if (s_fake.actorPos.z > kFakeGround || s_fake.vz > 0) {
         s_fake.vz -= kFakeGravity * kFakeDt;
         s_fake.actorPos.z += s_fake.vz * kFakeDt;
         if (s_fake.actorPos.z <= kFakeGround) {
             s_fake.actorPos.z = kFakeGround;
             s_fake.vz = 0;
         }
+    }
+    switch (s_fake.st) {
+    case FK_GROUND:
+        if (s_fake.actorPos.z > kFakeGround + 0.5f) FakeSetState(FK_FALL, "no ground below");
+        else if (edge) FakeSetState(FK_JUMP, "Space on the ground");
+        break;
+    case FK_FALL:
+        if (z0 > s_fake.actorPos.z) s_fake.fallDist += z0 - s_fake.actorPos.z;
+        if (s_fake.chance > 0) {
+            if (edge) {
+                s_fake.hspeed = s_fake.fallH;
+                FakeSetState(FK_JUMP, "second chance");
+                break;
+            }
+            s_fake.chance -= kFakeDt;
+        }
+        break;
+    case FK_JUMP:
+        if (edge) FakeSetState(FK_DOUBLE, "Space in the jump");
+        break;
+    }
+    if (s_fake.st != FK_GROUND && s_fake.actorPos.z <= kFakeGround && s_fake.vz <= 0) {
+        if (s_fake.st == FK_FALL) Log("test: landing after a fall of %.1f", s_fake.fallDist);
+        FakeSetState(FK_GROUND, "landed");
     }
 }
 
@@ -224,7 +304,12 @@ void Game_TestControl(int cmd)
     if (!Fake()) return;
     switch (cmd) {
     case 1: s_fake.loaded = true; break;
-    case 2: s_fake.loaded = false; memset(&s_fake.actorPos, 0, sizeof(s_fake.actorPos)); s_fake.vz = 0; break;
+    case 2:
+        s_fake.loaded = false;
+        memset(&s_fake.actorPos, 0, sizeof(s_fake.actorPos));
+        s_fake.vz = 0;
+        s_fake.st = FK_GROUND;
+        break;
     case 3: s_fake.camLost = true; break;
     case 4: s_fake.camLost = false; break;
     case 7: s_fake.actorPos.x += 500; s_fake.actorPos.z = kFakeGround; s_fake.vz = 0; break;
@@ -448,6 +533,158 @@ bool Game_SetPaused(void *game, bool on)
         if (!fn) return false;
         ((SetBool_t)fn)(game, NULL, on ? 1 : 0);
     } __except (CatchFl(on ? "setPaused(true)" : "setPaused(false)", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
+// ---- task 06: the player's state machine ----
+bool Game_PlayerMove(void *actor, GameMove *m)
+{
+    memset(m, 0, sizeof(*m));
+    m->onJump = m->onFall = m->chanceJump = -1;
+    if (Fake()) {
+        m->ok = true;
+        m->state = &s_fakeStates[s_fake.stObj];
+        m->stateVt = (void *)(UINT_PTR)(0x7E570000 + s_fake.st);
+        m->fall = s_fake.st == FK_FALL;
+        m->onJump = s_fake.st == FK_GROUND ? kFakeIdJump : (s_fake.st == FK_JUMP ? kFakeIdDouble : -1);
+        m->onFall = s_fake.st == FK_FALL ? -1 : kFakeIdFall;
+        if (m->fall) {
+            m->chanceJump = kFakeIdJump;
+            m->chanceDur = 0.2f;
+            m->fallDistLimit = 2000.0f;
+            m->fallDist = s_fake.fallDist;
+            m->chance = s_fake.chance;
+            m->stuck = s_fake.stuck;
+            m->fallHspeed = s_fake.fallH;
+        }
+        m->descFlags = s_fake.st == FK_GROUND ? 0 : 1;
+        m->ctrl = true;
+        m->onGround = s_fake.st == FK_GROUND;
+        m->hspeed = s_fake.hspeed;
+        m->vz = s_fake.vz;
+        m->jumpIn = s_fake.jumpIn;
+        return true;
+    }
+    __try {
+        if (!IsKnownPlayer(actor)) return false;
+        BYTE *a = (BYTE *)actor;
+        m->hspeed = *(float *)(a + OFS_PLAYER_HSPEED);
+        m->vz = *(float *)(a + OFS_PLAYER_VZ);
+        m->flags308 = *(DWORD *)(a + OFS_PLAYER_FLAGS);
+        m->jumpIn = a[OFS_PLAYER_JUMPIN];
+        BYTE *c = *(BYTE **)(a + OFS_PLAYER_CTRL);
+        if (c) {
+            m->ctrl = true;
+            m->onGround = c[0x109] && c[0x45] && !c[0x46];
+        }
+        BYTE *s = *(BYTE **)(a + OFS_PLAYER_STATE);
+        if (!s) return false;
+        m->state = s;
+        m->stateVt = *(void **)s;
+        if (!InImage(m->stateVt) || *(void **)(s + OFS_ST_ACTOR) != actor) return false;
+        BYTE *d = *(BYTE **)(s + OFS_ST_DESC);
+        if (!d) return false;
+        m->desc = d;
+        m->onJump = *(int *)(d + OFS_DESC_ONJUMP);
+        m->onFall = *(int *)(d + OFS_DESC_ONFALL);
+        m->descFlags = d[OFS_DESC_FLAGS];
+        if ((UINT_PTR)m->stateVt == PC_VT_PLAYERFALL) {
+            m->fall = true;
+            m->chanceDur = *(float *)(d + OFS_FDESC_CHANCE);
+            m->chanceJump = *(int *)(d + OFS_FDESC_CHJUMP);
+            m->fallDistLimit = *(float *)(d + OFS_FDESC_FALLDIST);
+            m->fallDist = *(float *)(s + OFS_FALL_DIST);
+            m->fallHspeed = *(float *)(s + OFS_FALL_HSPEED);
+            m->chance = *(float *)(s + OFS_FALL_CHANCE);
+            m->stuck = *(float *)(s + OFS_FALL_STUCK);
+        }
+        m->ok = true;
+    } __except (CatchFl("read player state", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
+void Game_MoveStr(const GameMove &m, char *buf, int size)
+{
+    if (!m.ok) {
+        _snprintf_s(buf, size, _TRUNCATE, "state unknown (state=%08X vt=%08X)", (unsigned)(UINT_PTR)m.state,
+                    (unsigned)(UINT_PTR)m.stateVt);
+        return;
+    }
+    int n = _snprintf_s(buf, size, _TRUNCATE, "state %08X vt=%08X%s onJump=%d onFall=%d inAir=%d | ground=%s jumpIn=%d "
+                        "vz=%.1f hspeed=%.1f flags308=%08X",
+                        (unsigned)(UINT_PTR)m.state, (unsigned)(UINT_PTR)m.stateVt, m.fall ? " (PlayerFall)" : "",
+                        m.onJump, m.onFall, m.descFlags & 1, m.ctrl ? (m.onGround ? "yes" : "no") : "no ctrl", m.jumpIn, m.vz,
+                        m.hspeed, m.flags308);
+    if (m.fall && n > 0 && n < size)
+        _snprintf_s(buf + n, size - n, _TRUNCATE, " | fall: dist=%.1f (limit %.0f) chance=%.3f s (duration %.3f, "
+                    "jump id %d) stuck=%.2f hspeedAtFall=%.1f",
+                    m.fallDist, m.fallDistLimit, m.chance, m.chanceDur, m.chanceJump, m.stuck, m.fallHspeed);
+}
+
+bool Game_FallArm(void *actor, void *state, float chance, bool resetDist, float hspeed)
+{
+    if (Fake()) {
+        if (state != &s_fakeStates[s_fake.stObj] || s_fake.st != FK_FALL) return false;
+        if (chance >= 0) s_fake.chance = chance;
+        if (resetDist) s_fake.fallDist = s_fake.stuck = 0;
+        if (hspeed >= 0) s_fake.fallH = hspeed;
+        return true;
+    }
+    __try {
+        if (!IsKnownPlayer(actor)) return false;
+        BYTE *s = *(BYTE **)((BYTE *)actor + OFS_PLAYER_STATE);
+        if (!s || s != state || *(UINT_PTR *)s != PC_VT_PLAYERFALL) return false;
+        if (chance >= 0) *(float *)(s + OFS_FALL_CHANCE) = chance;
+        if (resetDist) {
+            *(float *)(s + OFS_FALL_DIST) = 0;
+            *(float *)(s + OFS_FALL_STUCK) = 0;
+        }
+        if (hspeed >= 0) *(float *)(s + OFS_FALL_HSPEED) = hspeed;
+    } __except (CatchFl("write PlayerFall fields", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
+typedef char(__fastcall *ChangeState_t)(void *state, void *edx, int id);
+
+bool Game_StateChange(void *actor, void *state, int id)
+{
+    if (id == -1) return false;
+    if (Fake()) {
+        if (state != &s_fakeStates[s_fake.stObj]) return false;
+        if (id == kFakeIdFall) FakeSetState(FK_FALL, "changeState");
+        else if (id == kFakeIdJump) FakeSetState(FK_JUMP, "changeState");
+        else if (id == kFakeIdDouble) FakeSetState(FK_DOUBLE, "changeState");
+        else return false;
+        return true;
+    }
+    __try {
+        if (!IsKnownPlayer(actor)) return false;
+        void *s = *(void **)((BYTE *)actor + OFS_PLAYER_STATE);
+        if (!s || s != state || *(void **)((BYTE *)s + OFS_ST_ACTOR) != actor) return false;
+        void *fn = Method(s, VT_ST_CHANGE);
+        if ((UINT_PTR)fn != PC_ST_CHANGE) return false;  // only the base changeState we analysed
+        return ((ChangeState_t)fn)(s, NULL, id) != 0;
+    } __except (CatchFl("changeState vt[0x54]", GetExceptionInformation())) {
+        return false;
+    }
+}
+
+bool Game_ActorSetHspeed(void *actor, float v)
+{
+    if (Fake()) {
+        s_fake.hspeed = v;
+        return true;
+    }
+    __try {
+        if (!IsKnownPlayer(actor)) return false;
+        *(float *)((BYTE *)actor + OFS_PLAYER_HSPEED) = v;
+    } __except (CatchFl("write player +0x274", GetExceptionInformation())) {
         return false;
     }
     return true;

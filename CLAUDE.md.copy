@@ -55,11 +55,11 @@
 - **8.3-пути** (пробел в пути проекта ломает Ghidra и VMARGS): `_claudework` = `<repo>`, игра = `<game dir>`.
 - **Python**: `tools/venv/Scripts/python.exe -I` (pefile 2024.8.26, capstone 5.0.9).
 - **Компилятор**: MSVC 2022 Build Tools (cl 19.44, x86) + Windows SDK 10.0.26100 — **из системы**. Обёртка: `scripts\msvc32.bat <команда>` (vcvarsamd64_x86). Из bash: `cmd //c '<repo>\scripts\msvc32.bat cl /nologo …'` (пути — абсолютные 8.3; vcvars может сменить cwd). Флаги DLL: `/O2 /MT /LD`, `.def` для экспортов.
-- **Сборка DLL (меню, сейчас v0.4)**: `cmd //c '<repo>\src\dbgmenu\build.bat'` → `build\dinput8.dll` (+pdb; obj в `build\obj\`). Офлайн-тест без игры: `src\dbgmenu\test\test_d3d.cpp` (собрать в scratchpad рядом с копией DLL; ставит `DBGMENU_TEST=1`, жмёт клавиши PostMessage, Reset/пересоздание устройства, снимки `shotN.bmp`; полёт, зависание, курсор (симуляция, рабочий стол не трогается) — через экспорт `DbgMenuTest(cmd)` и подделку объектов игры в `game.cpp`, см. `notes\playerfly_pc.md` §3). Лог теста пишется рядом с DLL (в scratchpad), игровой `logs\dbgmenu.log` не трогается.
+- **Сборка DLL (меню, сейчас v0.5)**: `cmd //c '<repo>\src\dbgmenu\build.bat'` → `build\dinput8.dll` (+pdb; obj в `build\obj\`). Офлайн-тест без игры: `src\dbgmenu\test\test_d3d.cpp` (собрать в scratchpad рядом с копией DLL; ставит `DBGMENU_TEST=1`, жмёт клавиши PostMessage, Reset/пересоздание устройства, снимки `shotN.bmp`; полёт, зависание, курсор (симуляция, рабочий стол не трогается) — через экспорт `DbgMenuTest(cmd)` и подделку объектов игры в `game.cpp`, см. `notes\playerfly_pc.md` §3). Лог теста пишется рядом с DLL (в scratchpad), игровой `logs\dbgmenu.log` не трогается.
 - **Сборка прокси v0.1**: `cmd //c '<repo>\src\proxy_dinput8\build.bat'` → `build\proxy_dinput8\dinput8.dll`. Офлайн-проверка без игры: `src\proxy_dinput8\test_load.c` (собрать в scratchpad рядом с копией DLL, запустить `test_load.exe [wait]`).
 - **Ghidra PC** (проект `ghidra_project\ds2pc`, программа `Darksiders2.exe`): `cmd //c 'scripts\ghidra_run.bat -postScript Decomp.java <repo>\dumps\decomp_pc\out.c <addr>…'` (адрес может быть внутри функции; `!addr` — создать функцию, если Ghidra её не нашла — таких много). Также `XRefs.java`, `StrRefs.java`, `ExportGzf.java` (с `-readOnly`). Переимпорт с нуля: `scripts\ghidra_import.bat` (~19 мин). Из `.gzf`: Ghidra → Import File.
 - **Ghidra Xbox** (копия): `scripts\ghidra_xbox.bat -postScript Decomp.java …`.
-- **Быстрый x86-поиск** (часто быстрее Ghidra): `scripts/pcfind.py ref <VA>` (кто использует адрес как imm/disp), `calls <VA>` (прямые call/jmp), `str <текст>`, `dis <VA> [n]`, `dword <VA> [n]`, `float <v>`; `after_call.py <VA>` — что вызывают сразу после функции; `rtti_vt.py <имя RTTI>` — класс → vtable → ctor.
+- **Быстрый x86-поиск** (часто быстрее Ghidra): `scripts/pcfind.py ref <VA>` (кто использует адрес как imm/disp), `calls <VA>` (прямые call/jmp), `str <текст>`, `dis <VA> [n]`, `dword <VA> [n]`, `float <v>`, `data <VA>` (dword во всём образе — слоты vtable); `propmap.py [имя]` — свойства рефлексии: имя → смещение поля (готовая таблица `dumps\propmap_pc.txt`); `after_call.py <VA>` — что вызывают сразу после функции; `rtti_vt.py <имя RTTI>` — класс → vtable → ctor.
 - **Xbox-дизассемблер**: `scripts/ppcdis_xbox.py f|r|x|s …`, `xbox_words.py <addr> <n>` (читают дампы Xbox-проекта).
 
 ## 7. Ключевые факты PC (подробно — `notes\xbox_pc_map.md`, механизм Xbox — `notes\playerfly_xbox.md`)
@@ -77,12 +77,13 @@
 - Курсор: игра **не делает ClipCursor** (только `ClipCursor(NULL)` при WM_ACTIVATEAPP 0), держит курсор `SetCursorPos` в центр (0x0091BE79), прячет `ShowCursor`-циклами (0x00D4D087/0x00D4D07A). При потере фокуса игра **сама ставит свою паузу** (+1 к `+0xF8`) и снимает при возврате.
 - Главный цикл 0x00B3D821 → **кадр игры 0x00B3D3E4** (ECX=game; единственный вызов 0x00B3D85F). **Present, WndProc и логика — в одном потоке** [ПОДТВ логом v0.2].
 - Телепорт: игровой `teleportTo` 0x00796B71 = `actor->vt[0x34](&pos)` + `vt[0x138](0x00ACB5FC(&dir))`. playerFly v0.4 — `notes\playerfly_pc.md`.
+- **Автомат состояний героя** (подробно — `notes\playerfly_pc.md` §6): текущее состояние **`actor+0x310`**; состояние {vt, +8 desc, +0xC actor}; **`vt[0x54]` 0x006CDB14 = `bool changeState(id)`**. Desc: OnFall `+0x58`, OnJump `+0x60`, OnLand `+0xC0`, `+0xA8` бит 0 = InAir (таблица свойств — `dumps\propmap_pc.txt`). Прыжок с земли: ввод `actor+0x961` → vt[0x8C] → OnJump. **PlayerFall** vt 0x011E92A0: `+0xA0` пролетевшая высота, `+0xA8` гориз. скорость для прыжка, **`+0xAC` «второй шанс» (с)** → прыжок desc `+0x130`; после телепорта `+0xAC = 0` → прыгнуть нельзя (причина в v0.4). На земле = ctrl `+0x30C`: `+0x109 && +0x45 && !+0x46`.
 - Ввод: Raw Input клавиатуры без NOLEGACY (WM_KEYDOWN есть); WM_INPUT читается в WndProc игры (0x00403AF3 → 0x00913C78); `GetAsyncKeyState` только там же.
 
 ## 8. Текущее состояние (обновлять в конце задачи)
-- **Сделано:** 01 (setup + разведка + прокси v0.1), 02 (GitHub + память), 03 (DLL v0.2: меню F1, оверлей, блок ввода, showCameraPosition), 04 (правила отчёта/памяти §2; DLL v0.3: playerFly — F2, пауза, свободная камера A/B, телепорт, аварийные выходы), **05 (DLL v0.4: курсор спрятан и заперт в окне, Alt+Tab/Reset не прерывают полёт, только камера B и setPos+setYaw, камера игры за героя + переход 0.3 с, зависание после телепорта; `notes\playerfly_pc.md` §2, §5)**. Теги `review-01..05`.
-- **В игре проверено:** v0.1, v0.2, **v0.3 (2026-10-19; чек-лист п.1,2,4–7,9 ок; пауза работает; камера B — идеально, A — чернеет при телепорте; телепорт точный; мышь/стрейф не перевёрнуты; замечания → 05: курсор, Alt+Tab, камера после телепорта; Esc в полёте оставить глотаемым)**. В папке игры сейчас **v0.3**. **v0.4 в игре не проверена** — офлайн-тест пройден; пользователь ставит её по `build\README.md` и проходит чек-лист из `work_report.md`.
-- **Следующий шаг:** лог проверки v0.4 → подтвердить зависание (`+0x3B8`), направление камеры после reset (`yaw difference`), курсор/Alt+Tab; исправить найденное; затем **Show triggers** (обход EventManager, линии через вид/проекцию; матрицу вида — из `game->vt[0x7C]` / `StateCamera+0xC0`).
+- **Сделано:** 01 (setup + разведка + прокси v0.1), 02 (GitHub + память), 03 (DLL v0.2: меню F1, оверлей, блок ввода, showCameraPosition), 04 (правила отчёта/памяти §2; DLL v0.3: playerFly — F2, пауза, свободная камера, телепорт, аварийные выходы), 05 (DLL v0.4: курсор, Alt+Tab/Reset, камера игры за героя + переход 0.3 с, зависание после телепорта), **06 (DLL v0.5: прыжок из зависания — «второй шанс» PlayerFall держится взведённым, режимы General → hover jump: game / direct, высота падения от точки отпускания, «воздушное» состояние в зависании → OnFall; `notes\playerfly_pc.md` §6)**. Теги `review-01..06`.
+- **В игре проверено:** v0.1, v0.2, v0.3, **v0.4 (2026-10-19: всё как хотел пользователь — курсор, Alt+Tab, камера после телепорта, зависание; минус — нет прыжка → 06)**. Решения: наклон свободной камеры в игровую не переносить; клавиши, не отпускающие зависание (F, Esc, Alt, Win, Tab), — оставить. В папке игры сейчас **v0.4**. **v0.5 в игре не проверена** — офлайн-тест пройден; пользователь ставит по `build\README.md`, чек-лист — `work_report.md`.
+- **Следующий шаг:** лог проверки v0.5 → `jump id` (desc+0x130 ≠ −1), прыжок/двойной из зависания и после W, нет ли «застрял» (`flags308 & 0x8000`); исправить; затем **Show triggers** (обход EventManager, линии через вид/проекцию; матрица вида — `game->vt[0x7C]` / `StateCamera+0xC0`).
 - Потом: полировка меню (клавиши, сохранение настроек).
 
 ## 9. Индекс заметок (`_claudework\notes\`)
@@ -92,14 +93,14 @@
 | `review_02_github_memory.md` | итог 02: репо, LFS, что исключено, эта память |
 | `review_03_menu_overlay.md` | итог 03: DLL v0.2, решения по хукам/вводу, чек-лист v0.2 (последний review — дальше отчёт только в `work_report.md`) |
 | `progress_03.md` | журнал 03 (контрольная точка, офлайн-тест, найденная ошибка с refcount) |
-| `playerfly_pc.md` | **playerFly v0.4: статика 04 (рендер-матрица, пауза, setPos, yaw) и 05 (курсор игры, reset камеры, vz `+0x3B8`), устройство (курсор, фокус, зависание, переход камеры), офлайн-тест, открытые вопросы** |
+| `playerfly_pc.md` | **playerFly v0.5: статика 04 (рендер-матрица, пауза, setPos, yaw), 05 (курсор игры, reset камеры, vz `+0x3B8`), §6 — 06 (автомат состояний героя, PlayerFall, «второй шанс», прыжок из зависания); устройство, офлайн-тест, итоги проверки v0.4, открытые вопросы** |
 | `camera_teleport_pc.md` | PC: StateCamera, вид/проекция, главный цикл/кадр, телепорт (база для 04; уточнения — в `playerfly_pc.md`) |
 | `progress_01.md` | журнал 01 по этапам |
 | `xbox_pc_map.md` | **таблица адресов Xbox→PC**, проверка смещений, фильтр детекторов |
 | `playerfly_xbox.md` | механизм playerFly на Xbox (адреса, псевдокод, скорости, поля) |
 | `plan_architecture.md` | архитектура: прокси, хуки, отрисовка, меню, playerFly, триггеры |
 | `game_changes.md` | журнал изменений в папке игры |
-| также | `README.md` (репо), `build\README.md` (инструкция игроку v0.4), `build\proxy_dinput8\README.md` (v0.1), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
+| также | `README.md` (репо), `build\README.md` (инструкция игроку v0.5), `dumps\propmap_pc.txt` (свойства → смещения), `build\proxy_dinput8\README.md` (v0.1), `tools\VERSIONS.md`, `dumps\console_cmds_in_pc.md` |
 
 ## 10. Git — схема конца задачи NN (без вопроса пользователю)
 Репо: `_claudework\` → `origin` = `git@github.com:billymooreq/Darksiders2-DebugMenu.git`, ветка `main`. LFS: `ghidra_export/*.gzf`.

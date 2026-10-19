@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.4 (task 05)"
+#define DBGMENU_VERSION "dbgmenu v0.5 (task 06)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -92,6 +92,29 @@ bool Game_ActorTeleport(void *actor, const GameVec *pos, const GameVec *dir, flo
 bool Game_ActorSetPos(void *actor, const GameVec *pos);  // vt[0x34] only (hover hold)
 bool Game_ActorGetVz(void *actor, float *vz);      // player +0x3B8 vertical speed (only the known player class)
 bool Game_ActorSetVz(void *actor, float vz);       // +0x3B8 and its previous value +0x3BC
+// task 06: the player's state machine (notes/playerfly_pc.md §6)
+struct GameMove {
+    bool ok;                          // the known player class, current state readable
+    void *state, *stateVt, *desc;     // actor+0x310, its vtable, state+8
+    bool fall;                        // PlayerFall (vt 0x011E92A0): the fields below are valid
+    int onJump, onFall, chanceJump;   // desc+0x60 OnJump, +0x58 OnFall, PlayerFall desc+0x130 OnSecondChanceJump
+                                      // (-1 = none)
+    float chanceDur, fallDistLimit;   // PlayerFall desc +0x12C SecondChanceJumpDuration, +0x134 FallDistance
+    float fallDist, chance, stuck, fallHspeed;  // PlayerFall +0xA0 fallen height, +0xAC second chance left (s),
+                                                // +0xB0 "stuck" timer, +0xA8 horizontal speed for that jump
+    BYTE descFlags;                   // desc+0xA8 (bit 0 = InAir)
+    bool ctrl, onGround;              // controller +0x30C: on ground = +0x109 && +0x45 && !+0x46 (0x005029AD)
+    DWORD flags308;                   // actor+0x308 (bit 0x8000 = PlayerFall "stuck")
+    float hspeed, vz;                 // actor +0x274, +0x3B8
+    BYTE jumpIn;                      // actor+0x961 = input +0x81: jump pressed
+};
+bool Game_PlayerMove(void *actor, GameMove *m);
+void Game_MoveStr(const GameMove &m, char *buf, int size);
+// PlayerFall that is the current state: +0xAC = chance (if >= 0), +0xA0 = +0xB0 = 0 (if resetDist),
+// +0xA8 = hspeed (if >= 0)
+bool Game_FallArm(void *actor, void *state, float chance, bool resetDist, float hspeed);
+bool Game_StateChange(void *actor, void *state, int id);  // state->vt[0x54] 0x006CDB14 changeState(id), state current
+bool Game_ActorSetHspeed(void *actor, float v);            // +0x274
 bool Game_CamGetMatrix(void *cam, GameMat *out);   // cam+0x80
 bool Game_CamResetBehindPlayer(void *cam);         // StateCamera reset 0x005B7348 + default state 0x005D5B1A
 bool Game_PauseState(void *game, int *count, DWORD *flags);  // game+0xF8 / game+0x10
@@ -103,6 +126,8 @@ void Game_TestControl(int cmd);
 
 // ---- flight.cpp: playerFly ----
 extern bool g_hoverAfterTeleport;  // menu General -> hover after teleport (default on)
+enum { HJ_GAME = 0, HJ_DIRECT = 1 };
+extern int g_hoverJumpMode;        // menu General -> hover jump: game (second chance kept armed) / direct (we jump)
 extern volatile LONG g_flying;
 void Flight_Frame();                       // once per game frame, game thread
 void Flight_RequestToggle();               // F2 / menu

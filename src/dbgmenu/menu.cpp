@@ -32,6 +32,8 @@ static void Cmd_ShowTriggers();
 static void On_ShowCameraPosition();
 static void On_Hover();
 
+static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
+
 // Command registry (like the Xbox console registry): one line = one menu item; categories in order of appearance.
 static const Command g_commands[] = {
     {"General", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
@@ -40,6 +42,10 @@ static const Command g_commands[] = {
     {"General", "hover after teleport", "After the teleport the player hangs in the air until you press a move, "
      "jump or attack key (the camera works). Off: he falls at once.",
      CT_TOGGLE, On_Hover, &g_hoverAfterTeleport, NULL, 0, 0, 0, NULL},
+    {"General", "hover jump", "Space while hanging: a normal jump, then the double jump. game: the game jumps by "
+     "itself (its jump from a fall is kept ready); direct: the menu starts the jump. Also after W/attack: one jump "
+     "in the air while falling.",
+     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_hoverJumpMode, kHoverJumpNames, 2},
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
      CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, NULL},
     {"Graphics", "Show triggers", "Draw trigger volumes (EventManager detectors). Task 05.",
@@ -311,7 +317,7 @@ static void DrawFlyStatus()
     if (!flying) {  // the ImGui font has no em dash: plain hyphen
         ImGui::TextColored(kTitle, "HOVER");
         ImGui::SameLine();
-        ImGui::Text("- press any move/jump key");
+        ImGui::Text("- Space: jump, move/attack: let go");
         ImGui::SameLine();
         ImGui::TextDisabled("[F2 - fly again]");
     } else if (Flight_NoFocus()) {
