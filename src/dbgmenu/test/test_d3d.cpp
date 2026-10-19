@@ -1,6 +1,8 @@
 // Offline test of dbgmenu dinput8.dll without the game (DBGMENU_TEST=1).
 // Hidden D3D9 window; keys are posted as WM_KEYDOWN/WM_KEYUP; Reset and device re-creation are exercised;
 // back buffer snapshots are written as shotN.bmp next to the exe.
+// Task 05: the DLL simulates the system cursor in test mode (the desktop cursor is never clipped or hidden);
+// ShowCursor / ClipCursor called here play the game's own cursor calls (IAT-hooked like in the game).
 // Build: msvc32.bat cl /nologo /EHsc test_d3d.cpp d3d9.lib user32.lib   Run from a folder with dinput8.dll.
 #include <windows.h>
 #include <d3d9.h>
@@ -20,6 +22,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     if (m == WM_KEYDOWN) printf("  game WndProc got WM_KEYDOWN %02X\n", (unsigned)w);
     if (m == WM_KEYUP) printf("  game WndProc got WM_KEYUP %02X\n", (unsigned)w);
     if (m == WM_LBUTTONDOWN) printf("  game WndProc got WM_LBUTTONDOWN\n");
+    if (m == WM_RBUTTONDOWN) printf("  game WndProc got WM_RBUTTONDOWN\n");
     if (m == WM_MOUSEMOVE) printf("  game WndProc got WM_MOUSEMOVE\n");
     return DefWindowProcA(h, m, w, l);
 }
@@ -73,6 +76,12 @@ static void Key(int vk)
 static void KeyDown(int vk) { PostMessageA(g_wnd, WM_KEYDOWN, vk, 1); }
 static void KeyUp(int vk) { PostMessageA(g_wnd, WM_KEYUP, vk, 0xC0000001); }
 static void Mouse(int x, int y) { PostMessageA(g_wnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y)); }
+static void Click() { PostMessageA(g_wnd, WM_LBUTTONDOWN, MK_LBUTTON, 0); PostMessageA(g_wnd, WM_LBUTTONUP, 0, 0); }
+static void Focus(bool on)
+{
+    PostMessageA(g_wnd, WM_ACTIVATEAPP, on, 0);
+    PostMessageA(g_wnd, on ? WM_SETFOCUS : WM_KILLFOCUS, 0, 0);
+}
 
 typedef void(__cdecl *DbgMenuTest_t)(int);
 static DbgMenuTest_t g_ctl;
@@ -103,7 +112,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 520; frame++) {
+    for (int frame = 1; frame <= 520 + 110; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -136,42 +145,79 @@ int main()
         case 100: Key(VK_F1); break;
         case 110: Snapshot("shot4.bmp"); break;
         case 115: Key(VK_F1); break;
-        // ---- task 04: playerFly ----
+        // ---- task 04/05: playerFly ----
         case 125: Say("F2 before the level is loaded: unavailable"); Key(VK_F2); break;
-        case 130: Ctl(1); break;
+        case 130: Ctl(1); Ctl(6); break;
         case 135: Say("F2: enter flight"); Key(VK_F2); break;
+        case 137: Say("cursor in flight: hidden + clipped to the centre box"); Ctl(6); break;
+        case 138: {
+            Say("the game's own ShowCursor(TRUE) / ClipCursor(NULL) while captured: only recorded");
+            int r = ShowCursor(TRUE);
+            BOOL c = ClipCursor(NULL);
+            printf("  ShowCursor(TRUE) -> %d, ClipCursor(NULL) -> %d\n", r, c);
+            Ctl(6);
+            break;
+        }
         case 140: Say("hold W (must not reach the game)"); KeyDown('W'); break;
-        case 160: KeyUp('W'); break;
-        case 163: Say("mouse right 50 px"); Mouse(100, 100); break;
-        case 164: Mouse(150, 100); break;
-        case 170: Say("Shift+D"); KeyDown(VK_SHIFT); KeyDown('D'); break;
-        case 180: KeyUp('D'); KeyUp(VK_SHIFT); break;
-        case 182: Snapshot("shot5.bmp"); break;
-        case 185: Say("Enter: teleport + exit"); Key(VK_RETURN); break;
-        case 190: Say("W after the flight must reach the game"); Key('W'); break;
-        case 200: Say("enter, hold A, F2 exit, release A (release must be swallowed)"); Key(VK_F2); break;
-        case 205: KeyDown('A'); break;
-        case 210: Key(VK_F2); break;
-        case 215: KeyUp('A'); break;
-        case 220: Say("enter, device Reset -> emergency exit"); Key(VK_F2); break;
-        case 225: printf("Reset -> %08lX\n", g_dev->Reset(&g_pp)); break;
-        case 235: Say("enter, WM_ACTIVATEAPP(0) -> emergency exit"); Key(VK_F2); break;
-        case 240: PostMessageA(g_wnd, WM_ACTIVATEAPP, FALSE, 0); break;
-        case 250: Say("enter, exception in the flight frame -> emergency exit"); Key(VK_F2); break;
-        case 252: Ctl(5); break;
-        case 260: Say("enter, player lost -> emergency exit"); Key(VK_F2); break;
-        case 262: Ctl(2); break;
-        case 270: Say("F2 with no player: unavailable"); Key(VK_F2); break;
-        case 272: Ctl(1); break;
-        case 275: Say("enter, menu open in flight, W held (not to the game, flight not controlled)"); Key(VK_F2); break;
-        case 277: Key(VK_F1); break;
-        case 280: KeyDown('W'); break;
-        case 285: KeyUp('W'); break;
-        case 286: Say("menu: Camera -> fly camera -> A"); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_DOWN); Key(VK_LEFT); break;
-        case 287: Snapshot("shot6.bmp"); break;
-        case 290: Key(VK_F1); break;
-        case 292: Say("left click: teleport + exit"); PostMessageA(g_wnd, WM_LBUTTONDOWN, MK_LBUTTON, 0); PostMessageA(g_wnd, WM_LBUTTONUP, 0, 0); break;
-        case 300: Say("click after the flight must reach the game"); PostMessageA(g_wnd, WM_LBUTTONDOWN, MK_LBUTTON, 0); PostMessageA(g_wnd, WM_LBUTTONUP, 0, 0); break;
+        case 150: KeyUp('W'); break;
+        case 153: Say("mouse right 50 px"); Mouse(100, 100); break;
+        case 154: Mouse(150, 100); break;
+        case 158: Say("Shift+D"); KeyDown(VK_SHIFT); KeyDown('D'); break;
+        case 165: KeyUp('D'); KeyUp(VK_SHIFT); break;
+        case 167: Snapshot("shot5.bmp"); break;
+        case 170: Say("Alt+Tab away while W is held: flight frozen, cursor released, W forgotten"); KeyDown('W'); break;
+        case 175: Focus(false); break;  // the W release goes to another window: never posted here
+        case 177: Ctl(6); break;
+        case 180: Snapshot("shot6.bmp"); break;
+        case 190: Say("focus back: flight resumes, W not held"); Focus(true); break;
+        case 191: Say("click right after the focus came back: ignored"); Click(); break;
+        case 193: Ctl(6); break;
+        case 200: Say("device Reset in flight: the flight goes on"); printf("Reset -> %08lX\n", g_dev->Reset(&g_pp)); break;
+        case 230: Say("Enter: teleport, camera reset + blend, hover"); Key(VK_RETURN); break;
+        case 260: Say("hovering: menu open + W must not release it"); Key(VK_F1); break;
+        case 262: KeyDown('W'); break;
+        case 264: KeyUp('W'); break;
+        case 266: Key(VK_F1); break;
+        case 268: Snapshot("shot7.bmp"); break;
+        case 270: Say("Space: hover released, Space reaches the game, falls from vz 0"); KeyDown(VK_SPACE); break;
+        case 272: KeyUp(VK_SPACE); break;
+        case 310: Say("W after the hover must reach the game; cursor back to the game's state"); Key('W'); Ctl(6); break;
+        case 315: Say("enter, hold A, F2 exit, release A (release must be swallowed)"); Key(VK_F2); break;
+        case 318: KeyDown('A'); break;
+        case 321: Key(VK_F2); break;
+        case 324: KeyUp('A'); break;
+        case 330: Say("enter, teleport by a held left button -> hover; its release does nothing; right button releases"); Key(VK_F2); break;
+        case 334: PostMessageA(g_wnd, WM_LBUTTONDOWN, MK_LBUTTON, 0); break;
+        case 345: PostMessageA(g_wnd, WM_LBUTTONUP, 0, 0); break;
+        case 350: PostMessageA(g_wnd, WM_RBUTTONDOWN, MK_RBUTTON, 0); break;
+        case 351: PostMessageA(g_wnd, WM_RBUTTONUP, 0, 0); break;
+        case 360: Say("enter + teleport -> hover; the game moves the player (respawn): hover stops"); Key(VK_F2); break;
+        case 363: Key(VK_RETURN); break;
+        case 370: Ctl(7); break;
+        case 380: Say("enter + teleport -> hover; F2 -> flight again, F2 -> exit"); Key(VK_F2); break;
+        case 383: Key(VK_RETURN); break;
+        case 390: Key(VK_F2); break;
+        case 395: Key(VK_F2); break;
+        case 400: Say("menu: General -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 402: Snapshot("shot8.bmp"); break;
+        case 404: Key(VK_F1); break;
+        case 410: Say("hover off: teleport -> falls at once"); Key(VK_F2); break;
+        case 413: Key(VK_RETURN); break;
+        case 450: Say("enter, exception in the flight frame -> emergency exit"); Key(VK_F2); break;
+        case 452: Ctl(5); break;
+        case 460: Say("enter, player lost -> emergency exit"); Key(VK_F2); break;
+        case 462: Ctl(2); break;
+        case 470: Say("F2 with no player: unavailable"); Key(VK_F2); break;
+        case 472: Ctl(1); break;
+        case 475: Say("enter, menu open in flight, W held (not to the game, flight not controlled)"); Key(VK_F2); break;
+        case 477: Key(VK_F1); break;
+        case 480: KeyDown('W'); break;
+        case 485: KeyUp('W'); break;
+        case 487: Snapshot("shot9.bmp"); break;
+        case 490: Key(VK_F1); break;
+        case 495: Say("left click: teleport + exit (hover off)"); Click(); break;
+        case 505: Say("click after the flight must reach the game"); Click(); break;
+        case 510: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

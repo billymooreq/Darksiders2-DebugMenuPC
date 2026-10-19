@@ -27,26 +27,21 @@ struct Command {
     int numNames;
 };
 
-static const char *const kFlyCamNames[] = {"A", "B"};
-static const char *const kTeleportNames[] = {"setPos", "setPos+repeat"};
-
 static void Cmd_PlayerFly();
 static void Cmd_ShowTriggers();
 static void On_ShowCameraPosition();
+static void On_Hover();
 
 // Command registry (like the Xbox console registry): one line = one menu item; categories in order of appearance.
 static const Command g_commands[] = {
     {"General", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
      "Space/C up/down, Enter or left click: teleport the player here, F2: back without teleport.",
      CT_ACTION, Cmd_PlayerFly, NULL, NULL, 0, 0, 0, "F2"},
-    {"General", "teleport method", "setPos: player setPos + setYaw once, like the game's teleportTo. "
-     "setPos+repeat: the same, applied again on the first 3 frames after the game resumes.",
-     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_teleportMode, kTeleportNames, 2},
+    {"General", "hover after teleport", "After the teleport the player hangs in the air until you press a move, "
+     "jump or attack key (the camera works). Off: he falls at once.",
+     CT_TOGGLE, On_Hover, &g_hoverAfterTeleport, NULL, 0, 0, 0, NULL},
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
      CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, NULL},
-    {"Camera", "fly camera", "How playerFly moves the view. A: writes the game camera itself (StateCamera). "
-     "B: replaces only the matrix given to the renderer. Can be switched while flying.",
-     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_flyCamMode, kFlyCamNames, 2},
     {"Graphics", "Show triggers", "Draw trigger volumes (EventManager detectors). Task 05.",
      CT_ACTION, Cmd_ShowTriggers, NULL, NULL, 0, 0, 0, NULL},
     {"Menu", "Panel opacity", "Background opacity of the menu panel.",
@@ -94,12 +89,13 @@ void Menu_Status(const char *fmt, ...)
 
 static bool StatusActive() { return s_status[0] && (LONG)(s_statusUntil - GetTickCount()) > 0; }
 
-bool Menu_WantsDraw() { return g_menuOpen || g_showCameraPosition || StatusActive() || g_flying; }
+bool Menu_WantsDraw() { return g_menuOpen || g_showCameraPosition || StatusActive() || g_flying || Flight_Hovering(); }
 
 // ---- commands ----
 static void Cmd_PlayerFly() { Flight_RequestToggle(); }  // done by the next game frame
 static void Cmd_ShowTriggers() { Menu_Status("Show triggers: not implemented yet"); }
 static void On_ShowCameraPosition() { Menu_Status("Show Camera Position %s", g_showCameraPosition ? "on" : "off"); }
+static void On_Hover() { Menu_Status("hover after teleport %s", g_hoverAfterTeleport ? "on" : "off"); }
 
 static void Execute(const Command *c)
 {
@@ -300,24 +296,36 @@ static void DrawToast()
     ImGui::End();
 }
 
-// playerFly status line, bottom centre
+// playerFly / hover status line, bottom centre
 static void DrawFlyStatus()
 {
     GameVec p;
-    if (!Flight_GetCamPos(&p)) return;
+    bool flying = Flight_GetCamPos(&p);
+    if (!flying && !Flight_Hovering()) return;
     float fs = ImGui::GetFontSize();
     ImGuiIO &io = ImGui::GetIO();
     ImGui::SetNextWindowPos(ImVec2(io.DisplaySize.x * 0.5f, io.DisplaySize.y - fs * 1.5f), ImGuiCond_Always,
                             ImVec2(0.5f, 1.0f));
     ImGui::SetNextWindowBgAlpha(s_panelAlpha * 0.85f);
     ImGui::Begin("##dbgfly", NULL, kPanelFlags | ImGuiWindowFlags_AlwaysAutoResize);
-    ImGui::TextColored(kTitle, "FLY");
-    ImGui::SameLine();
-    ImGui::Text(" speed \xC3\x97%g  pos (%.0f %.0f %.0f)  cam %s ", Flight_SpeedMul(), p.x, p.y, p.z,
-                g_flyCamMode == FLYCAM_A ? "A" : "B");
-    ImGui::SameLine();
-    ImGui::TextDisabled(g_menuOpen ? "[menu open: flight stopped, F1 closes the menu]"
-                                   : "[Enter/LMB - teleport, F2 - exit]");
+    if (!flying) {  // the ImGui font has no em dash: plain hyphen
+        ImGui::TextColored(kTitle, "HOVER");
+        ImGui::SameLine();
+        ImGui::Text("- press any move/jump key");
+        ImGui::SameLine();
+        ImGui::TextDisabled("[F2 - fly again]");
+    } else if (Flight_NoFocus()) {
+        ImGui::TextColored(kTitle, "FLY");
+        ImGui::SameLine();
+        ImGui::Text("(paused, no focus)");
+    } else {
+        ImGui::TextColored(kTitle, "FLY");
+        ImGui::SameLine();
+        ImGui::Text(" speed \xC3\x97%g  pos (%.0f %.0f %.0f) ", Flight_SpeedMul(), p.x, p.y, p.z);
+        ImGui::SameLine();
+        ImGui::TextDisabled(g_menuOpen ? "[menu open: flight stopped, F1 closes the menu]"
+                                       : "[Enter/LMB - teleport, F2 - exit]");
+    }
     ImGui::End();
 }
 
@@ -378,7 +386,7 @@ void Info_Draw()
     VecLine("dir", gi.camPosOk, gi.camDir, "vt[0x40]");
     VecLine("+0xB0", gi.camSt == ST_OK || gi.camSt == ST_BADPTR, gi.camRaw, "raw");
     GameVec fly;
-    if (Flight_GetCamPos(&fly)) VecLine("fly", true, fly, Flight_CamModeName(g_flyCamMode));
+    if (Flight_GetCamPos(&fly)) VecLine("fly", true, fly, "free camera");
     if (gi.exCode) ImGui::TextColored(kStatus, "exception %08X at %08X", gi.exCode, gi.exAddr);
     ImGui::End();
 }

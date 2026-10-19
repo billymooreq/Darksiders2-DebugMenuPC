@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.3 (task 04)"
+#define DBGMENU_VERSION "dbgmenu v0.4 (task 05)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -20,6 +20,7 @@ bool InText(const void *p);   // inside the exe .text (functions)
 // ---- hooks.cpp: MinHook + IAT + D3D9 + game functions ----
 bool Hooks_Install();
 void **FindImportSlot(HMODULE mod, const char *dll, const char *func);
+bool PatchSlot(void **slot, void *fn, void **orig);
 extern bool g_frameHooked;  // game frame 0x00B3D3E4 hooked -> flight runs there, otherwise from Present
 
 // ---- input.cpp: WndProc subclass, Raw Input filter, key queue ----
@@ -35,8 +36,19 @@ void Input_UpdateBlock();               // g_inputBlocked = menu open || flying
 bool Input_KeyHeld(int vk);             // from our own view of key events (works while the game is blocked)
 void Input_TakeMouse(long *dx, long *dy);  // relative mouse motion accumulated while flying
 void Input_ResetFlight();               // drop accumulated mouse motion
+HWND Input_Hwnd();                      // the game window we subclassed (NULL before CreateDevice)
+bool Input_WindowActive();              // the game window has the focus (activation messages + foreground)
+DWORD Input_ActiveForMs();              // time since the window got the focus (back)
+void Input_HoverArm();                  // keys/buttons held now never release the hover (e.g. the teleport press)
+int Input_HoverKey();                   // game control key/button pressed since Input_HoverArm (0 = none)
 extern UINT(WINAPI *o_GetRawInputData)(HRAWINPUT, UINT, LPVOID, PUINT, UINT);
 UINT WINAPI Hook_GetRawInputData(HRAWINPUT h, UINT cmd, LPVOID data, PUINT size, UINT hdr);
+
+// ---- cursor.cpp: system cursor hidden and locked in the window while the menu is open or flying ----
+void Cursor_InstallHooks(HMODULE exe);  // IAT ShowCursor / ClipCursor / SetCursorPos of the exe
+void Cursor_Update();                   // game thread: every frame and on activation messages
+void Cursor_OnUnload();
+void Cursor_TestLog(const char *when);  // test mode: log the simulated cursor state
 
 // ---- overlay.cpp: ImGui on top of the game frame ----
 void Overlay_SetDevice(IDirect3DDevice9 *dev, HWND hwnd);
@@ -77,27 +89,29 @@ void *Game_CameraRaw(void *game);                  // StateCamera game+0x138 (no
 bool Game_GetActor(void *game, void **actor);      // getPlayerActor (reference released at once)
 bool Game_ActorGetPos(void *actor, GameVec *out);  // vt[0x38]
 bool Game_ActorTeleport(void *actor, const GameVec *pos, const GameVec *dir, float *yawOut);  // vt[0x34] + vt[0x138]
+bool Game_ActorSetPos(void *actor, const GameVec *pos);  // vt[0x34] only (hover hold)
+bool Game_ActorGetVz(void *actor, float *vz);      // player +0x3B8 vertical speed (only the known player class)
+bool Game_ActorSetVz(void *actor, float vz);       // +0x3B8 and its previous value +0x3BC
 bool Game_CamGetMatrix(void *cam, GameMat *out);   // cam+0x80
-bool Game_CamSetMatrix(void *cam, const GameMat *m);  // cam+0x80 and cam+0xC0 (what the renderer reads)
+bool Game_CamResetBehindPlayer(void *cam);         // StateCamera reset 0x005B7348 + default state 0x005D5B1A
 bool Game_PauseState(void *game, int *count, DWORD *flags);  // game+0xF8 / game+0x10
 bool Game_SetPaused(void *game, bool on);          // game->vt[0x68] 0x00B3C287
 void Game_LogActorMethods(void *actor);
-void Game_TestTick();                               // test mode: fake game objects
+void Game_TestTick();                               // test mode: fake game objects (+ simple gravity)
+void Game_TestRender();                             // test mode: fake renderer asks game->vt[0x7C]
 void Game_TestControl(int cmd);
 
 // ---- flight.cpp: playerFly ----
-enum { FLYCAM_A = 0, FLYCAM_B = 1 };
-extern int g_flyCamMode;    // A: write StateCamera matrices; B: replace game->vt[0x7C] result (render only)
-extern int g_teleportMode;  // 0: setPos once; 1: setPos + re-apply on the first frames after unpause
+extern bool g_hoverAfterTeleport;  // menu General -> hover after teleport (default on)
 extern volatile LONG g_flying;
 void Flight_Frame();                       // once per game frame, game thread
 void Flight_RequestToggle();               // F2 / menu
 void Flight_RequestTeleport();             // Enter / left mouse button while flying
-void Flight_RequestAbort(const char *why); // Reset, focus loss
+void Flight_RequestAbort(const char *why); // real failures only (not focus loss, not Reset)
 void Flight_OnUnload(bool processExit);
 void Flight_TestThrow();                   // test mode: exception in the next flight frame
-void Flight_AfterCamUpdate(void *cam, int which);  // hook: after StateCamera tick (0) / update (1)
-bool Flight_RenderMatrix(float *out, void *caller);  // hook: game->vt[0x7C]
+bool Flight_RenderMatrix(float *out, void *caller);  // hook: game->vt[0x7C] (free camera / blend after teleport)
 bool Flight_GetCamPos(GameVec *out);
 float Flight_SpeedMul();
-const char *Flight_CamModeName(int mode);
+bool Flight_Hovering();
+bool Flight_NoFocus();                     // flying, but the window lost the focus (frozen)

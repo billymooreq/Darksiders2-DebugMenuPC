@@ -145,12 +145,20 @@ void Game_Read(GameInfo *gi)
 #define OFS_GAME_PAUSE     0xF8
 #define OFS_GAME_CAMERA    0x138
 #define OFS_CAM_MATRIX     0x80         // camera world matrix (getMatrix vt[0x3C], pos vt[0x44])
-#define OFS_CAM_RENDER     0xC0         // copy of +0x80 after the tick (+shake etc.), game->vt[0x7C] returns it
+// task 05 (notes/playerfly_pc.md §5):
+#define PC_VT_PLAYER       0x01266568u  // player actor class: +0x3B8 vertical speed, +0x3BC its previous value
+#define OFS_PLAYER_VZ      0x3B8        // < 0 = falling (PlayerFall 0x006D7A08); setPos keeps it (v0.3 log)
+#define OFS_PLAYER_VZ_PREV 0x3BC
+#define PC_VT_STATECAM     0x01199EA0u
+#define PC_CAM_RESET       0x005B7348u  // StateCamera::reset (script resetCamera 0x004E572F): matrix behind target yaw
+#define PC_CAM_TO_DEFAULT  0x005D5B1Au  // cdecl (cam, float, float): transition to the default state cam+0x160
 
 typedef void(__fastcall *SetVec_t)(void *self, void *edx, const GameVec *v);
 typedef void(__fastcall *SetFloat_t)(void *self, void *edx, float f);
 typedef void(__fastcall *SetBool_t)(void *self, void *edx, int b);
 typedef float(__cdecl *YawFromDir_t)(const GameVec *dir);
+typedef void(__fastcall *CamReset_t)(void *cam, void *edx);
+typedef int(__cdecl *CamToDefault_t)(void *cam, float blendIn, float blendOut);
 
 static volatile LONG s_exBudget;
 
@@ -173,10 +181,11 @@ static struct {
     int frames;
     bool loaded, camLost;
     GameVec actorPos;
-    float actorYaw;
-    GameMat cam, camRender;
-    int pause;
+    float actorYaw, vz;
+    GameMat cam;
+    int pause, resets;
 } s_fake;
+static const float kFakeGround = 250.0f, kFakeGravity = 1000.0f, kFakeDt = 1.0f / 60.0f;
 static bool Fake() { return g_testMode && !g_gameMatch; }
 
 void Game_TestTick()
@@ -185,24 +194,43 @@ void Game_TestTick()
     if (++s_fake.frames == 1) {  // looking along +X, right = -Y, up = +Z (right-handed, Z up)
         static const float m[16] = {0, -1, 0, 0, 0, 0, 1, 0, -1, 0, 0, 0, 100, 200, 300, 1};
         memcpy(s_fake.cam.m, m, sizeof(m));
-        s_fake.camRender = s_fake.cam;
     }
     if (s_fake.loaded && s_fake.actorPos.x == 0 && s_fake.actorPos.y == 0 && s_fake.actorPos.z == 0) {
-        s_fake.actorPos.x = 100; s_fake.actorPos.y = 200; s_fake.actorPos.z = 250;
+        s_fake.actorPos.x = 100; s_fake.actorPos.y = 200; s_fake.actorPos.z = kFakeGround;
+    }
+    // the fake "game frame": gravity while not paused (the hover hold runs before it, like before 0x00B3D3E4)
+    if (s_fake.loaded && !s_fake.pause && (s_fake.actorPos.z > kFakeGround || s_fake.vz > 0)) {
+        s_fake.vz -= kFakeGravity * kFakeDt;
+        s_fake.actorPos.z += s_fake.vz * kFakeDt;
+        if (s_fake.actorPos.z <= kFakeGround) {
+            s_fake.actorPos.z = kFakeGround;
+            s_fake.vz = 0;
+        }
     }
 }
 
-// 1 = level loaded, 2 = level unloaded (player gone), 3 = camera lost, 4 = camera back
+// the fake renderer asks for the camera matrix like 0x00B3CD27 does (game->vt[0x7C])
+void Game_TestRender()
+{
+    if (!Fake()) return;
+    GameMat m = s_fake.cam;
+    Flight_RenderMatrix(m.m, (void *)0x00B3CD7E);
+}
+
+// 1 = level loaded, 2 = level unloaded (player gone), 3 = camera lost, 4 = camera back,
+// 7 = the game moves the player by itself (respawn / scripted teleport)
 void Game_TestControl(int cmd)
 {
     if (!Fake()) return;
     switch (cmd) {
     case 1: s_fake.loaded = true; break;
-    case 2: s_fake.loaded = false; memset(&s_fake.actorPos, 0, sizeof(s_fake.actorPos)); break;
+    case 2: s_fake.loaded = false; memset(&s_fake.actorPos, 0, sizeof(s_fake.actorPos)); s_fake.vz = 0; break;
     case 3: s_fake.camLost = true; break;
     case 4: s_fake.camLost = false; break;
+    case 7: s_fake.actorPos.x += 500; s_fake.actorPos.z = kFakeGround; s_fake.vz = 0; break;
     }
-    Log("test: control %d (loaded=%d camLost=%d pause=%d)", cmd, s_fake.loaded, s_fake.camLost, s_fake.pause);
+    Log("test: control %d (loaded=%d camLost=%d pause=%d pos=(%.1f %.1f %.1f) vz=%.1f)", cmd, s_fake.loaded,
+        s_fake.camLost, s_fake.pause, s_fake.actorPos.x, s_fake.actorPos.y, s_fake.actorPos.z, s_fake.vz);
 }
 
 // ---- API ----
@@ -294,6 +322,88 @@ bool Game_ActorTeleport(void *actor, const GameVec *pos, const GameVec *dir, flo
     return true;
 }
 
+bool Game_ActorSetPos(void *actor, const GameVec *pos)
+{
+    if (Fake()) {
+        s_fake.actorPos.x = pos->x; s_fake.actorPos.y = pos->y; s_fake.actorPos.z = pos->z;
+        return true;
+    }
+    __try {
+        void *setPos = Method(actor, VT_ACTOR_SETPOS);
+        if (!setPos) return false;
+        GameVec p = *pos;
+        p.w = 0;
+        ((SetVec_t)setPos)(actor, NULL, &p);
+    } __except (CatchFl("actor setPos vt[0x34]", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
+// only for the player class we analysed: +0x3B8 is its vertical speed there, not in other classes
+static bool IsKnownPlayer(void *actor) { return *(UINT_PTR *)actor == PC_VT_PLAYER; }
+
+bool Game_ActorGetVz(void *actor, float *vz)
+{
+    *vz = 0;
+    if (Fake()) {
+        *vz = s_fake.vz;
+        return true;
+    }
+    __try {
+        if (!IsKnownPlayer(actor)) return false;
+        *vz = *(float *)((BYTE *)actor + OFS_PLAYER_VZ);
+    } __except (CatchFl("read player vz", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
+bool Game_ActorSetVz(void *actor, float vz)
+{
+    if (Fake()) {
+        s_fake.vz = vz;
+        return true;
+    }
+    __try {
+        if (!IsKnownPlayer(actor)) return false;
+        *(float *)((BYTE *)actor + OFS_PLAYER_VZ) = vz;
+        *(float *)((BYTE *)actor + OFS_PLAYER_VZ_PREV) = vz;
+    } __except (CatchFl("write player vz", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
+// The same pair the game uses when it puts the player at an object (0x0088E5A0: setPos, setYaw, then
+// StateCamera reset 0x005B7348 and 0x005D5B1A(cam, -1, -1)): the camera matrix goes behind the target along
+// its yaw (vt[0x134] = player +0x140, written by setYaw), then the camera returns to its default state.
+bool Game_CamResetBehindPlayer(void *cam)
+{
+    if (Fake()) {
+        float y = s_fake.actorYaw * 0.017453293f, c = cosf(y), sn = sinf(y);
+        float m[16] = {sn, -c, 0, 0, 0, 0, 1, 0, -c, -sn, 0, 0, s_fake.actorPos.x - 195 * c,
+                       s_fake.actorPos.y - 195 * sn, s_fake.actorPos.z + 60, 1};
+        memcpy(s_fake.cam.m, m, sizeof(m));
+        s_fake.resets++;
+        Log("test: camera reset behind the player (yaw %.1f) #%d", s_fake.actorYaw, s_fake.resets);
+        return true;
+    }
+    static const BYTE kReset[] = {0x53, 0x8B, 0xDC, 0x51, 0x51, 0x83, 0xE4, 0xF0};
+    static const BYTE kToDefault[] = {0x6A, 0x04, 0xB8, 0x0C, 0xB8, 0x00, 0x01};
+    __try {
+        if (*(UINT_PTR *)cam != PC_VT_STATECAM) return false;
+        if (memcmp((void *)PC_CAM_RESET, kReset, sizeof(kReset)) != 0 ||
+            memcmp((void *)PC_CAM_TO_DEFAULT, kToDefault, sizeof(kToDefault)) != 0)
+            return false;
+        ((CamReset_t)PC_CAM_RESET)(cam, NULL);
+        ((CamToDefault_t)PC_CAM_TO_DEFAULT)(cam, -1.0f, -1.0f);
+    } __except (CatchFl("camera reset (0x005B7348 / 0x005D5B1A)", GetExceptionInformation())) {
+        return false;
+    }
+    return true;
+}
+
 bool Game_CamGetMatrix(void *cam, GameMat *out)
 {
     if (Fake()) {
@@ -303,21 +413,6 @@ bool Game_CamGetMatrix(void *cam, GameMat *out)
     __try {
         memcpy(out->m, (BYTE *)cam + OFS_CAM_MATRIX, sizeof(out->m));
     } __except (CatchFl("read camera matrix", GetExceptionInformation())) {
-        return false;
-    }
-    return true;
-}
-
-bool Game_CamSetMatrix(void *cam, const GameMat *m)
-{
-    if (Fake()) {
-        s_fake.cam = s_fake.camRender = *m;
-        return true;
-    }
-    __try {
-        memcpy((BYTE *)cam + OFS_CAM_MATRIX, m->m, sizeof(m->m));
-        memcpy((BYTE *)cam + OFS_CAM_RENDER, m->m, sizeof(m->m));  // like StateCamera setMatrix 0x005B5BEC
-    } __except (CatchFl("write camera matrix", GetExceptionInformation())) {
         return false;
     }
     return true;

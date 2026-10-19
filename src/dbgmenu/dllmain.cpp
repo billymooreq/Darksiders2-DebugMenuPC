@@ -146,6 +146,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         }
     } else if (reason == DLL_PROCESS_DETACH) {
         Flight_OnUnload(reserved != NULL);
+        Cursor_OnUnload();
         Log("==== unload (process exit=%d) ====", reserved != NULL);
     }
     return TRUE;
@@ -170,10 +171,12 @@ extern "C" HRESULT WINAPI Proxy_DllRegisterServer(void) { return p_DllRegisterSe
 extern "C" HRESULT WINAPI Proxy_DllUnregisterServer(void) { return p_DllUnregisterServer ? p_DllUnregisterServer() : E_FAIL; }
 extern "C" LPCVOID WINAPI Proxy_GetdfDIJoystick(void) { return p_GetdfDIJoystick ? p_GetdfDIJoystick() : NULL; }
 
-// Offline test harness only (does nothing in the game): 1..4 fake game state, 5 = exception in the flight frame.
+// Offline test harness only (does nothing in the game): 1..4, 7 fake game state, 5 = exception in the flight frame,
+// 6 = log the simulated cursor state.
 extern "C" void __cdecl DbgMenuTest(int cmd)
 {
     if (!g_testMode || g_gameMatch) return;
     if (cmd == 5) Flight_TestThrow();
+    else if (cmd == 6) Cursor_TestLog("check");
     else Game_TestControl(cmd);
 }

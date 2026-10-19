@@ -1,5 +1,6 @@
-// Hooks: IAT (Direct3DCreate9, GetRawInputData) -> MinHook on d3d9.dll methods
-// (IDirect3D9::CreateDevice, IDirect3DDevice9::Present/Reset/Release, IDirect3DSwapChain9::Present).
+// Hooks: IAT (Direct3DCreate9, GetRawInputData, ShowCursor/ClipCursor/SetCursorPos) -> MinHook on d3d9.dll methods
+// (IDirect3D9::CreateDevice, IDirect3DDevice9::Present/Reset/Release, IDirect3DSwapChain9::Present) and on two
+// game functions (frame 0x00B3D3E4, Darksiders::getCameraMatrix 0x004CD9DA).
 #include "common.h"
 #include "MinHook.h"
 #include <intrin.h>
@@ -47,7 +48,7 @@ void **FindImportSlot(HMODULE mod, const char *dll, const char *func)
     return NULL;
 }
 
-static bool PatchSlot(void **slot, void *fn, void **orig)
+bool PatchSlot(void **slot, void *fn, void **orig)
 {
     DWORD old;
     if (!VirtualProtect(slot, sizeof(void *), PAGE_READWRITE, &old)) return false;
@@ -102,7 +103,8 @@ static HRESULT STDMETHODCALLTYPE hkSCPresent(IDirect3DSwapChain9 *sc, const RECT
 static HRESULT STDMETHODCALLTYPE hkReset(IDirect3DDevice9 *dev, D3DPRESENT_PARAMETERS *pp)
 {
     static volatile LONG budget;
-    Flight_RequestAbort("device Reset");  // done by the next game frame (never from inside the renderer)
+    static volatile LONG flyBudget;
+    if (g_flying && LogBudget(&flyBudget, 50)) Log("Reset during the flight: the flight goes on");  // task 05
     Overlay_BeforeReset(dev);  // D3DPOOL_DEFAULT resources must be gone before Reset
     HRESULT hr = o_Reset(dev, pp);
     if (LogBudget(&budget, 50))
@@ -186,42 +188,23 @@ static IDirect3D9 *WINAPI hkDirect3DCreate9(UINT sdk)
 
 // ---- game functions (task 04, notes/camera_teleport_pc.md) ----
 #define PC_GAME_FRAME   0x00B3D3E4u  // __fastcall frame(Darksiders*), called by Darksiders::run 0x00B3D821
-#define PC_CAM_TICK     0x005B8599u  // StateCamera vt[0x34] tick(dt): state -> +0x80, copy -> +0xC0 (+effects)
-#define PC_CAM_UPDATE   0x005B5D33u  // StateCamera vt[0x38] update(arg, Matrix*)
 #define PC_GAME_CAMMAT  0x004CD9DAu  // Darksiders vt[0x7C] getCameraMatrix(out) = copy of (game+0x138)+0xC0
 #define PC_VT_GAME      0x0116E230u
-#define PC_VT_STATECAM  0x01199EA0u
 #define PC_SETPAUSED    0x00B3C287u
+// camera A of v0.3 (hooks of StateCamera tick 0x005B8599 / update 0x005B5D33 + writes of cam+0x80/+0xC0) was
+// removed in task 05: the user chose B; it is in git history (tag review-04).
 
 bool g_frameHooked;
 
 typedef void(__fastcall *Frame_t)(void *game);
-typedef DWORD(__fastcall *CamTick_t)(void *cam, void *edx, DWORD a);
-typedef DWORD(__fastcall *CamUpdate_t)(void *cam, void *edx, DWORD a, DWORD b);
 typedef void *(__fastcall *GetMat_t)(void *game, void *edx, float *out);
 static Frame_t o_Frame;
-static CamTick_t o_CamTick;
-static CamUpdate_t o_CamUpdate;
 static GetMat_t o_GetCamMatrix;
 
 static void __fastcall hkFrame(void *game)
 {
     Flight_Frame();  // between frames: requests, pause, teleport, camera matrix for this frame
     o_Frame(game);
-}
-
-static DWORD __fastcall hkCamTick(void *cam, void *edx, DWORD a)
-{
-    DWORD r = o_CamTick(cam, edx, a);
-    Flight_AfterCamUpdate(cam, 0);
-    return r;
-}
-
-static DWORD __fastcall hkCamUpdate(void *cam, void *edx, DWORD a, DWORD b)
-{
-    DWORD r = o_CamUpdate(cam, edx, a, b);
-    Flight_AfterCamUpdate(cam, 1);
-    return r;
 }
 
 static void *__fastcall hkGetCamMatrix(void *game, void *edx, float *out)
@@ -253,19 +236,13 @@ static void CheckSlot(UINT_PTR vt, int ofs, UINT_PTR expect, const char *name)
 static void InstallGameHooks()
 {
     static const BYTE kFrame[] = {0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x1C};
-    static const BYTE kTick[] = {0x6A, 0x10, 0x6A, 0x38, 0xB8};
-    static const BYTE kUpdate[] = {0x55, 0x8B, 0xEC, 0x53};
     static const BYTE kGetMat[] = {0x55, 0x8B, 0xEC, 0x8B, 0x89, 0x38, 0x01, 0x00, 0x00};
     CheckSlot(PC_VT_GAME, 0x68, PC_SETPAUSED, "Darksiders");
     CheckSlot(PC_VT_GAME, 0x7C, PC_GAME_CAMMAT, "Darksiders");
-    CheckSlot(PC_VT_STATECAM, 0x34, PC_CAM_TICK, "StateCamera");
-    CheckSlot(PC_VT_STATECAM, 0x38, PC_CAM_UPDATE, "StateCamera");
     g_frameHooked = HookGame(PC_GAME_FRAME, kFrame, sizeof(kFrame), (void *)hkFrame, (void **)&o_Frame, "game frame");
     if (!g_frameHooked) Log("WARNING: no frame hook -> playerFly runs from Present (camera one frame late)");
-    HookGame(PC_CAM_TICK, kTick, sizeof(kTick), (void *)hkCamTick, (void **)&o_CamTick, "StateCamera::tick (A)");
-    HookGame(PC_CAM_UPDATE, kUpdate, sizeof(kUpdate), (void *)hkCamUpdate, (void **)&o_CamUpdate, "StateCamera::update (A)");
     HookGame(PC_GAME_CAMMAT, kGetMat, sizeof(kGetMat), (void *)hkGetCamMatrix, (void **)&o_GetCamMatrix,
-             "Darksiders::getCameraMatrix (B)");
+             "Darksiders::getCameraMatrix");
 }
 
 bool Hooks_Install()
@@ -287,5 +264,6 @@ bool Hooks_Install()
         slot ? (unsigned)(UINT_PTR)*slot : 0);
     if (!slot || !PatchSlot(slot, (void *)Hook_GetRawInputData, (void **)&o_GetRawInputData))
         Log("WARNING: GetRawInputData IAT hook failed -> raw keyboard/mouse not filtered");
+    Cursor_InstallHooks(exe);
     return true;
 }
