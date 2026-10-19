@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.10.1 (task 11)"
+#define DBGMENU_VERSION "dbgmenu v0.10.2 (task 11)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -166,6 +166,7 @@ void Trig_TestControl(int cmd);    // test mode: 8 projection check, 9 empty lis
 // loaded world (real game only)
 bool Trig_View(float *vp, float *cam, float *proj);
 int Trig_EventManagers(void **out, int max);
+int Trig_Worlds(void **out, int max);  // max >= 4
 
 // task 09: hooks of the detector body overlap callbacks (before the original): log "trigger fired" for the player
 void Trig_OnDetectorAdd(void *body, void *collidable);  // 0x008B82DD: a collidable starts overlapping

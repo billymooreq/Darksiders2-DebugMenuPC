@@ -595,7 +595,14 @@ bool Trig_View(float *vp, float *cam, float *proj)
     return true;
 }
 
-// task 11: the EventManagers of the loaded world (their actor list +0x8 has the characters); real game only
+// task 11: the loaded worlds (their ActorManager has the characters - monsters.cpp); real game only
+int Trig_Worlds(void **out, int max)
+{
+    if (TrigFake() || max < 4) return 0;
+    return Worlds(out);
+}
+
+// task 11 (v0.10 / v0.10.1, not used since v0.10.2): the EventManagers of the loaded world; real game only
 int Trig_EventManagers(void **out, int max)
 {
     if (TrigFake() || max <= 0) return 0;

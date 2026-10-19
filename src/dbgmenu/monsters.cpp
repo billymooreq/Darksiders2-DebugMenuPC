@@ -15,7 +15,10 @@
 //   Xbox toggleMonsterUpdate (0x825BE168): byte 0x83723A08 (1 = update). PC: byte 0x014D4278 = 1, read by the
 //     three Monster update functions 0x007AEE47 (vt[0x21C]), 0x007B2DB2 (vt[0x68]), 0x007BA0DD (vt[0x220]) exactly
 //     like on the Xbox. Freeze = 0, back = 1. Off by itself on a level load, the player's death, F10 off, unload.
-// Characters: the actor list of every EventManager (evm+0x8, like the detectors at +0x14 in triggers.cpp), class by
+// Characters: the ActorManager of the world (getActorManager 0x004CF805, like getEventManager: World+0x118 map, key
+// [0x01588160]; Xbox 0x82430CB0 - its debug list 0x8299C310 counts "Monsters: %d" from it): array +0x20/+0x24 =
+// characters, array +0x5C/+0x60 = entries whose vt[0x1C]() gives the character (PC 0x008C963B / 0x008DD6D5). v0.10 /
+// v0.10.1 walked the EventManager list +0x8 - in the game it holds only event handlers (no characters). Class by
 // the reflection: obj->vt[4] = class descriptor (vt 0x0116228C, +8 parent, +0x10 Name), kind = Monster [0x0156F524]
 // / NPC [0x0157B1CC] / Player [0x01562FE8] by walking the parents. Everything of the game is read in the game
 // thread (the overlay runs in Present = the game thread), every object in its own __try.
@@ -70,7 +73,10 @@ int g_monWho;            // MW_*
 #define OFS_BEH_SUB        0xF8          // IBehavior (ctor 0x006B8538): +0xF8 the running part, its Name +0xB0
 #define OFS_SUB_NAME       0xB0
 #define OFS_BEH_COOLDOWNS  0x120         // std::map<Name, float>: +4 head node, +8 size (Xbox 0x828CAF88)
-#define OFS_EVM_ACTORS     0x08          // {head, tail, count}, node {next, obj}
+#define PC_GET_ACTORMGR    0x004CF805u   // ActorManager *__thiscall getActorManager(World *) (World+0x118, [0x01588160])
+#define OFS_AM_CHARS       0x20          // ActorManager: {data, count} of characters
+#define OFS_AM_ENTRIES     0x5C          // ActorManager: {data, count} of entries, entry->vt[0x1C]() = the character
+#define VT_ENTRY_ACTOR     0x1C
 
 enum { MK_NONE = 0, MK_MONSTER, MK_NPC, MK_PLAYER };
 static const float kRangeM[] = {10, 20, 30, 50, 75, 100, 150, 0};  // 0 = unlimited
@@ -100,6 +106,7 @@ static int s_numItems;
 struct MStats {
     int chars, monsters, npcs, players, evms, nodes, badNodes, broken, longList, overflow, inRange, drawn, overlap;
     int noVt, oddGetter, badCls, notChar, noPos;  // why objects of the actor list were skipped
+    int entries, direct, noActor;                 // ActorManager: +0x5C entries, +0x20 characters, entries without one
 };
 static MStats s_st;
 
@@ -151,10 +158,12 @@ static const int kFakeObjs = 9, kFakeBig = 300;
 static __declspec(align(16)) BYTE s_fObj[kFakeObjs][0xD00];
 static __declspec(align(16)) BYTE s_fStats[kFakeObjs][0x200], s_fDesc[kFakeObjs][0x200];
 static __declspec(align(16)) BYTE s_fState[2][0x40], s_fBeh[0x140], s_fSub[0xC0], s_fMapNodes[3][0x20];
-static struct FakeNode { FakeNode *next; void *obj; } s_fNodes[kFakeObjs + 2];
-static BYTE s_fEvm[0x20];
+static BYTE s_fAm[0x80];                       // fake ActorManager
+static void *s_fChars[kFakeObjs + 2];           // +0x20: Death, Vulgrim, Coin_03, a bad pointer
+static __declspec(align(16)) BYTE s_fEntry[320][0x20];  // +0x5C: entries {vt, ?, the character}
+static void *s_fEntries[320];
+static void *s_fvEntry[0x40 / 4];
 static BYTE *s_fBigObj, *s_fBigStats;
-static FakeNode *s_fBigNodes;
 static int s_fakeMode;         // 0 normal, 23 = 300 monsters, 25 = the first one removed
 static BYTE s_fakeFlag = 1;    // stands for 0x014D4278
 static __declspec(align(16)) BYTE s_fakeOpt[0x60];
@@ -179,6 +188,7 @@ static void FakePlace(BYTE *o, float a, float b, float c)
 static void *__fastcall FakeGetClass(void *self, void *) { return *(void **)((BYTE *)self + 0xCC0); }
 static void *__fastcall FakeGetClassSmall(void *self, void *) { return *(void **)((BYTE *)self + 0x1C); }
 static void *__fastcall FakeGetName(void *self, void *) { return (BYTE *)self + OFS_OBJ_NAME; }
+static void *__fastcall FakeEntryActor(void *self, void *) { return *(void **)((BYTE *)self + 8); }
 static GameVec *__fastcall FakeGetPos(void *self, void *, GameVec *out)
 {
     *out = *(GameVec *)((BYTE *)self + 0x260);
@@ -238,6 +248,8 @@ static void FakeBuild()
         s_fvObj[VT_GETNAME / 4] = (void *)FakeGetName;
         s_fvObj[VT_GETPOS / 4] = (void *)FakeGetPos;
         s_fvSmall[VT_GETCLASS / 4] = (void *)FakeGetClassSmall;
+        for (int i = 0; i < 0x40 / 4; i++) s_fvEntry[i] = (void *)(UINT_PTR)(0x7D200000 + i);
+        s_fvEntry[VT_ENTRY_ACTOR / 4] = (void *)FakeEntryActor;
         s_fvCls[8 / 4] = (void *)(UINT_PTR)PC_CLS_GETNAME;  // like the game: both class vtables share these methods
         s_fvCls[0x10 / 4] = (void *)(UINT_PTR)PC_CLS_ISKINDOF;
         memcpy(s_fvCls2, s_fvCls, sizeof(s_fvCls2));
@@ -300,54 +312,57 @@ static void FakeBuild()
         *(BYTE **)(s_fObj[0] + OFS_MON_BEHAVIOR) = s_fBeh;
         *(BYTE **)(s_fObj[0] + OFS_MON_TARGET) = s_fObj[6];
     }
+    int ne = 0, nc = 0;
     if (s_fakeMode == 23) {
         if (!s_fBigObj) {
             s_fBigObj = (BYTE *)VirtualAlloc(NULL, kFakeBig * 0xD00, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
             s_fBigStats = (BYTE *)VirtualAlloc(NULL, kFakeBig * 0x200, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-            s_fBigNodes = (FakeNode *)VirtualAlloc(NULL, kFakeBig * sizeof(FakeNode), MEM_COMMIT | MEM_RESERVE,
-                                                   PAGE_READWRITE);
-            if (s_fBigObj && s_fBigStats && s_fBigNodes)
+            if (s_fBigObj && s_fBigStats)
                 for (int i = 0; i < kFakeBig; i++)  // a 15 x 20 grid ahead of the camera
                     FakeObj(i, s_fBigObj + i * 0xD00, s_fBigStats + i * 0x200, s_fDesc[0], (i % 3) ? FC_GHOUL : FC_SKEL,
                             FN_OBJ + (i % 3 ? 1 : 0), 300.0f + (i % 15) * 120.0f, (i / 15 - 10) * 90.0f, -60, 70,
                             (float)(20 + i % 70), 90, 10);
         }
-        if (s_fBigObj && s_fBigStats && s_fBigNodes) {
+        if (s_fBigObj && s_fBigStats)
             for (int i = 0; i < kFakeBig; i++) {
                 FakePlace(s_fBigObj + i * 0xD00, 300.0f + (i % 15) * 120.0f, (i / 15 - 10) * 90.0f, -60);
-                s_fBigNodes[i].obj = s_fBigObj + i * 0xD00;
-                s_fBigNodes[i].next = i + 1 < kFakeBig ? &s_fBigNodes[i + 1] : NULL;
+                memset(s_fEntry[ne], 0, 0x20);
+                *(void ***)s_fEntry[ne] = s_fvEntry;
+                *(void **)(s_fEntry[ne] + 8) = s_fBigObj + i * 0xD00;
+                s_fEntries[ne] = s_fEntry[ne];
+                ne++;
             }
-            memset(s_fEvm, 0, sizeof(s_fEvm));
-            *(void **)(s_fEvm + OFS_EVM_ACTORS) = &s_fBigNodes[0];
-            *(int *)(s_fEvm + OFS_EVM_ACTORS + 8) = kFakeBig;
-            return;
+    } else {
+        for (int i = 0; i < kFakeObjs - 1; i++) FakePlace(s_fObj[i], kFakeLocal[i][0], kFakeLocal[i][1], kFakeLocal[i][2]);
+        // monsters through entries (+0x5C), the rest directly (+0x20); Skel_A01 is in both (counted once)
+        for (int i = s_fakeMode == 25 ? 1 : 0; i < 5; i++) {
+            memset(s_fEntry[ne], 0, 0x20);
+            *(void ***)s_fEntry[ne] = s_fvEntry;
+            *(void **)(s_fEntry[ne] + 8) = s_fObj[i];
+            s_fEntries[ne] = s_fEntry[ne];
+            ne++;
         }
+        if (s_fakeMode != 25) s_fChars[nc++] = s_fObj[0];
+        for (int i = 5; i < kFakeObjs - 1; i++) s_fChars[nc++] = s_fObj[i];
+        s_fChars[nc++] = (void *)(UINT_PTR)0x10;  // a bad pointer
     }
-    for (int i = 0; i < kFakeObjs - 1; i++) FakePlace(s_fObj[i], kFakeLocal[i][0], kFakeLocal[i][1], kFakeLocal[i][2]);
-    int k = 0;
-    for (int i = s_fakeMode == 25 ? 1 : 0; i < kFakeObjs; i++) {
-        s_fNodes[k].obj = i == kFakeObjs - 1 ? (void *)(UINT_PTR)0x10 : (void *)s_fObj[i];  // the last: bad object
-        s_fNodes[k].next = NULL;
-        if (k) s_fNodes[k - 1].next = &s_fNodes[k];
-        k++;
-    }
-    memset(s_fEvm, 0, sizeof(s_fEvm));
-    *(void **)(s_fEvm + OFS_EVM_ACTORS) = &s_fNodes[0];
-    *(void **)(s_fEvm + OFS_EVM_ACTORS + 4) = &s_fNodes[k - 1];
-    *(int *)(s_fEvm + OFS_EVM_ACTORS + 8) = k;
+    memset(s_fAm, 0, sizeof(s_fAm));
+    *(void ***)(s_fAm + OFS_AM_CHARS) = s_fChars;
+    *(int *)(s_fAm + OFS_AM_CHARS + 4) = nc;
+    *(void ***)(s_fAm + OFS_AM_ENTRIES) = s_fEntries;
+    *(int *)(s_fAm + OFS_AM_ENTRIES + 4) = ne;
 }
 
 // ======================= access helpers (real or fake) =======================
 static bool VtOk(void *vt)
 {
-    if (Fake()) return vt == s_fvObj || vt == s_fvSmall || vt == s_fvCls || vt == s_fvCls2;
+    if (Fake()) return vt == s_fvObj || vt == s_fvSmall || vt == s_fvCls || vt == s_fvCls2 || vt == s_fvEntry;
     return InImage(vt);
 }
 static bool FnOk(void *fn)
 {
     if (Fake()) return fn == (void *)FakeGetClass || fn == (void *)FakeGetClassSmall || fn == (void *)FakeGetName ||
-                       fn == (void *)FakeGetPos;
+                       fn == (void *)FakeGetPos || fn == (void *)FakeEntryActor;
     return InText(fn);
 }
 // getPos (vt[0x38]) we call: Character 0x00885362 (+0x260, also Monster / player) and WorldObject 0x008EF6B2 (+0x90)
@@ -373,29 +388,45 @@ static int s_nBadClsVt;
 static CStr_t CStrFn() { return Fake() ? FakeCStr : (CStr_t)(UINT_PTR)PC_NAME_CSTR; }
 static BYTE *UpdateFlag() { return Fake() ? &s_fakeFlag : (BYTE *)(UINT_PTR)PC_UPDATE_FLAG; }
 
-// vt[4] getClass is only called when its code is a plain read: "mov eax, [abs]; ret" (native classes, e.g. the
-// detectors 0x008B7C0B, PlayerFall 0x006D6A25) or "mov eax, [ecx + disp]; ret" (an instance class: Monster +0xB90
-// 0x007B3F90, the player +0xCC0, AIBehavior +0x130). Anything else is skipped (logged once per function).
-static volatile LONG s_oddGetClassBudget;
-static bool PlainGetter(void *fn)
+// only "reads then ret" is called: a chain of mov eax, [ecx+d] / mov eax, [eax+d] / mov eax, [abs] / lea eax, [ecx+d]
+// (disp8 / disp32) ending in ret (C3), at most 4 reads. getClass: Monster 0x007B3F90 (+0xB90), the player +0xCC0,
+// detectors (a global), AIBehavior +0x130. Anything else is skipped and logged with its first bytes.
+static volatile LONG s_oddGetterBudget;
+static bool ReadsOnly(const BYTE *b)
+{
+    int o = 0;
+    for (int n = 0; n < 4; n++) {
+        if (b[o] == 0xC3) return n > 0;
+        if (b[o] == 0xA1) { o += 5; continue; }                       // mov eax, [abs32]
+        if (b[o] == 0x8B || b[o] == 0x8D) {                           // mov / lea eax, [ecx|eax + disp]
+            BYTE m = b[o + 1];
+            if (m == 0x41 || m == 0x40) { o += 3; continue; }         // disp8
+            if (m == 0x81 || m == 0x80) { o += 6; continue; }         // disp32
+            if (m == 0x01 || m == 0x00) { o += 2; continue; }         // [ecx] / [eax]
+        }
+        return false;
+    }
+    return b[o] == 0xC3;
+}
+static bool PlainGetter(void *fn, const char *what)
 {
     if (Fake()) return true;
-    static void *s_ok[256], *s_bad[64];
+    static void *s_ok[512], *s_bad[64];
     static int s_nOk, s_nBad;
     for (int i = 0; i < s_nOk; i++)
         if (s_ok[i] == fn) return true;
     for (int i = 0; i < s_nBad; i++)
         if (s_bad[i] == fn) return false;
     const BYTE *b = (const BYTE *)fn;
-    bool ok = (b[0] == 0xA1 && b[5] == 0xC3) || (b[0] == 0x8B && b[1] == 0x81 && b[6] == 0xC3) ||
-              (b[0] == 0x8B && b[1] == 0x41 && b[3] == 0xC3);
+    bool ok = ReadsOnly(b);
     if (ok) {
-        if (s_nOk < 256) s_ok[s_nOk++] = fn;
+        if (s_nOk < 512) s_ok[s_nOk++] = fn;
     } else {
         if (s_nBad < 64) s_bad[s_nBad++] = fn;
-        if (LogBudget(&s_oddGetClassBudget, 20))
-            Log("monsters: vt[4] %08X is not a plain getter (%02X %02X %02X %02X) -> such objects are skipped",
-                (unsigned)(UINT_PTR)fn, b[0], b[1], b[2], b[3]);
+        if (LogBudget(&s_oddGetterBudget, 30))
+            Log("monsters: %s %08X is not a plain getter (%02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X) "
+                "-> skipped", what, (unsigned)(UINT_PTR)fn, b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7], b[8], b[9],
+                b[10], b[11]);
     }
     return ok;
 }
@@ -409,7 +440,7 @@ static void *ClassOf(void *obj)
         return NULL;
     }
     void *fn = vt[VT_GETCLASS / 4];
-    if (!FnOk(fn) || !PlainGetter(fn)) {
+    if (!FnOk(fn) || !PlainGetter(fn, "getClass vt[4]")) {
         s_st.oddGetter++;
         return NULL;
     }
@@ -581,18 +612,36 @@ static bool s_diag;               // the collection after "info ON": remember th
 static void *s_diagCls[24];
 static int s_nDiagCls;
 
-// 1 = added, 0 = skipped, -1 = exception in the object, -2 = the node is unreadable
-static int ReadNode(BYTE *node, BYTE **next)
+// one frame: every object only once (an actor can be in both arrays)
+static void *s_seen[8192];
+static int s_seenList[4096], s_nSeen;
+static bool SeenOnce(void *obj)
 {
-    void *obj;
-    __try {
-        *next = *(BYTE **)node;
-        obj = *(void **)(node + 4);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
-        *next = NULL;
-        return -2;
+    unsigned h = ((unsigned)(UINT_PTR)obj >> 3) & 8191;
+    for (int i = 0; i < 32; i++) {
+        unsigned k = (h + i) & 8191;
+        if (s_seen[k] == obj) return true;
+        if (!s_seen[k]) {
+            s_seen[k] = obj;
+            if (s_nSeen < 4096) s_seenList[s_nSeen++] = (int)k;
+            return false;
+        }
     }
-    if ((UINT_PTR)obj < 0x10000) return obj ? -1 : 0;  // not an object (counted as a bad node, no exception)
+    return false;
+}
+static void SeenClear()
+{
+    if (s_nSeen >= 4096) memset(s_seen, 0, sizeof(s_seen));
+    else
+        for (int i = 0; i < s_nSeen; i++) s_seen[s_seenList[i]] = NULL;
+    s_nSeen = 0;
+}
+
+// 1 = added, 0 = skipped, -1 = exception in the object
+static int ReadObj(void *obj)
+{
+    if ((UINT_PTR)obj < 0x10000) return obj ? -1 : 0;  // not an object (counted as a bad entry, no exception)
+    if (SeenOnce(obj)) return 0;
     __try {
         void *cls = ClassOf(obj);
         if (!cls) return 0;
@@ -628,59 +677,114 @@ static int ReadNode(BYTE *node, BYTE **next)
         it.height = DescHeight(obj);
         s_numItems++;
         return 1;
-    } __except (CatchMon("character node", GetExceptionInformation())) {
+    } __except (CatchMon("character", GetExceptionInformation())) {
         return -1;
     }
 }
 
-static void WalkActors(BYTE *evm)
+// entry (+0x5C array) -> its character through vt[0x1C] (only a plain getter); NULL = none
+static void *EntryActor(void *e)
 {
-    BYTE *head;
+    if ((UINT_PTR)e < 0x10000) return NULL;
+    __try {
+        void **vt = *(void ***)e;
+        if (!VtOk(vt)) return NULL;
+        void *fn = vt[VT_ENTRY_ACTOR / 4];
+        if (!FnOk(fn) || !PlainGetter(fn, "entry vt[0x1C]")) return NULL;
+        return ((GetPtr_t)fn)(e, NULL);
+    } __except (CatchMon("ActorManager entry", GetExceptionInformation())) {
+        return NULL;
+    }
+}
+
+// {data, count} array of the ActorManager; entries = the +0x5C kind
+static void WalkArray(BYTE *am, int ofs, bool entries)
+{
+    void **data;
     int count;
     __try {
-        head = *(BYTE **)(evm + OFS_EVM_ACTORS);
-        count = *(int *)(evm + OFS_EVM_ACTORS + 8);
-    } __except (CatchMon("EventManager actor list", GetExceptionInformation())) {
+        data = *(void ***)(am + ofs);
+        count = *(int *)(am + ofs + 4);
+    } __except (CatchMon("ActorManager array", GetExceptionInformation())) {
         s_st.broken++;
         return;
     }
-    int limit = (count >= 0 && count < kMaxNodes - 64) ? count + 64 : kMaxNodes;
-    int n = 0;
-    BYTE *node = head;
-    while (node && n < limit) {
-        BYTE *next = NULL;
-        int r = ReadNode(node, &next);
-        n++;
-        if (r == -1) s_st.badNodes++;
-        else if (r == -2) {
+    if (count <= 0) return;
+    if (count > 20000 || !data) {
+        s_st.longList++;
+        return;
+    }
+    if (entries) s_st.entries += count;
+    else s_st.direct += count;
+    for (int i = 0; i < count; i++) {
+        void *p;
+        __try {
+            p = data[i];
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
             s_st.broken++;
             break;
         }
-        node = next;
+        s_st.nodes++;
+        if (entries) {
+            p = EntryActor(p);
+            if (!p) {
+                s_st.noActor++;
+                continue;
+            }
+        }
+        if (ReadObj(p) < 0) s_st.badNodes++;
     }
-    if (node && n >= limit) s_st.longList++;
-    s_st.nodes += n;
+}
+
+typedef void *(__fastcall *GetMgr_t)(void *world, void *edx);
+static void *ActorManagerOf(void *world)
+{
+    static const BYTE kPro[] = {0x55, 0x8B, 0xEC, 0x51, 0x56, 0x68, 0x60, 0x81, 0x58, 0x01};  // push 0x01588160
+    void *am = NULL;
+    __try {
+        if (!InImage(*(void **)world)) return NULL;
+        if (memcmp((void *)PC_GET_ACTORMGR, kPro, sizeof(kPro)) != 0) {
+            static volatile LONG once;
+            if (LogBudget(&once, 1)) Log("monsters: getActorManager 0x004CF805 has unexpected bytes -> no characters");
+            return NULL;
+        }
+        am = ((GetMgr_t)(UINT_PTR)PC_GET_ACTORMGR)(world, NULL);
+        if (am && !InImage(*(void **)am)) return NULL;
+    } __except (CatchMon("getActorManager 0x004CF805", GetExceptionInformation())) {
+        return NULL;
+    }
+    return am;
 }
 
 static void CollectInner()
 {
     memset(&s_st, 0, sizeof(s_st));
     s_numItems = 0;
+    SeenClear();
     if (s_testThrow) {
         s_testThrow = false;
         *(volatile int *)0 = 1;
     }
-    void *evms[4];
-    int ne;
+    void *ams[4];
+    int na = 0;
     if (Fake()) {
         FakeBuild();
-        evms[0] = s_fEvm;
-        ne = 1;
+        ams[na++] = s_fAm;
     } else {
-        ne = Trig_EventManagers(evms, 4);
+        void *worlds[4];
+        int nw = Trig_Worlds(worlds, 4);
+        for (int i = 0; i < nw && na < 4; i++) {
+            void *am = ActorManagerOf(worlds[i]);
+            bool dup = false;
+            for (int j = 0; j < na; j++) dup |= ams[j] == am;
+            if (am && !dup) ams[na++] = am;
+        }
     }
-    s_st.evms = ne;
-    for (int i = 0; i < ne; i++) WalkActors((BYTE *)evms[i]);
+    s_st.evms = na;
+    for (int i = 0; i < na; i++) {
+        WalkArray((BYTE *)ams[i], OFS_AM_ENTRIES, true);  // the monsters (Xbox / PC 0x008C963B count them here)
+        WalkArray((BYTE *)ams[i], OFS_AM_CHARS, false);
+    }
 }
 
 // ======================= what one character shows =======================
@@ -1317,9 +1421,10 @@ static void LogFields(const char *why)
         if (j == ncc && ncc < 32) cc[ncc].cls = s_items[i].cls, cc[ncc].n = 0, cc[ncc].kind = s_items[i].kind, ncc++;
         if (j < ncc) cc[j].n++;
     }
-    Log("monsters: %s: EventManagers %d, nodes %d, characters %d (monsters %d, NPC %d, players %d), listed %d | "
-        "bad nodes %d, broken lists %d, too long %d, over limit %d | classes Monster %08X NPC %08X Player %08X",
-        why, s_st.evms, s_st.nodes, s_st.chars, s_st.monsters, s_st.npcs, s_st.players, s_numItems, s_st.badNodes,
+    Log("monsters: %s: ActorManagers %d (entries +0x5C %d, characters +0x20 %d, entries without an actor %d), objects "
+        "%d, characters %d (monsters %d, NPC %d, players %d), listed %d | "
+        "bad objects %d, broken arrays %d, too long %d, over limit %d | classes Monster %08X NPC %08X Player %08X",
+        why, s_st.evms, s_st.entries, s_st.direct, s_st.noActor, s_st.nodes, s_st.chars, s_st.monsters, s_st.npcs, s_st.players, s_numItems, s_st.badNodes,
         s_st.broken, s_st.longList, s_st.overflow, (unsigned)(UINT_PTR)s_clsMonster, (unsigned)(UINT_PTR)s_clsNpc,
         (unsigned)(UINT_PTR)s_clsPlayer);
     Log("monsters:   skipped: no vtable %d, odd getClass %d, not a class descriptor %d, not a character %d, unknown "
