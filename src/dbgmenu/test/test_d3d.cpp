@@ -503,7 +503,7 @@ int main()
         case 1660: Say("final cursor state: released"); Ctl(6); break;
         // ---- task 11: section Monsters (fake actors in monsters.cpp, placed in front of the camera by cmd 17:
         // Skel_A01 straight ahead 600 units, Ghoul_07 / Ghoul_08 side by side (their labels overlap), Skel_Far
-        // 1400 units (42 m), Behind_01 behind the camera, Vulgrim (NPC), Death (player), Coin_03 (not a character),
+        // 4500 units (45 m), Behind_01 behind the camera, Vulgrim (NPC), Death (player), Coin_03 (not a character),
         // one bad object). The menu keys are read by the next overlay frame: F1 that closes the menu comes a frame
         // later. ----
         case 1665: Say("11a: debug off: F5 (info: target) reaches the game"); Key(VK_F5); break;
@@ -547,7 +547,7 @@ int main()
         case 1732: Ctl(18); break;
         case 1734: Say("11h: freeze on again, the player dies -> off by itself"); Key(VK_F1); Key(VK_RETURN); break;
         case 1735: Key(VK_F1); break;
-        case 1736: Ctl(20); break;
+        case 1737: Ctl(20); break;  // after the next frame applied the freeze
         case 1738: Ctl(18); Ctl(26); break;
         case 1740: Say("11i: the target is gone from the list -> another target"); Ctl(25); break;
         case 1742: Ctl(18); Ctl(17); break;

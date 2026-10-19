@@ -36,7 +36,9 @@ int g_monWho;            // MW_*
 #define PC_CLS_MONSTER_PTR 0x0156F524u   // Monster class descriptor (registered 0x007B5CC7, parent NPC)
 #define PC_CLS_NPC_PTR     0x0157B1CCu   // NPC (0x00837B48, parent Character)
 #define PC_CLS_PLAYER_PTR  0x01562FE8u   // Player (0x00723C00, parent Character; War / Death below it)
-#define PC_VT_CLASS        0x0116228Cu   // class descriptor vtable (ctor 0x0048A35F)
+#define PC_VT_CLASS        0x0116228Cu   // class descriptor vtable (ctor 0x0048A35F); scripted classes: 0x01166A08
+#define PC_CLS_GETNAME     0x0054B0DDu   // class vt[8] (lea eax, [ecx+0x10]) - the same in both class vtables
+#define PC_CLS_ISKINDOF    0x004898FDu   // class vt[0x10] (walks +8)
 #define PC_NAME_CSTR       0x00497245u   // const char *__thiscall Name::c_str(Name *) - "" for an unknown name
 #define PC_OBJ_GETNAME     0x005A327Bu   // vt[0x2C] getName: lea eax, [ecx+0x50]
 #define PC_MAX_HEALTH      0x0078EBD0u   // int __thiscall getMaxHealth(Character *) = scale 0x0078E5D7 * stats+0x8C
@@ -51,7 +53,9 @@ int g_monWho;            // MW_*
 #define OFS_CLS_NAME       0x10
 #define OFS_OBJ_NAME       0x50          // Name (8 bytes)
 #define OFS_CHR_DESC       0x144         // 0x0076D72C (lazily made config); +0x190 proxy height (vt[0x25C])
-#define OFS_DESC_HEIGHT    0x190
+#define OFS_DESC_HEIGHT    0x190         // proxy "height" (vt[0x25C]; the player has 20 - not the body height)
+#define OFS_DESC_PROXY_LO  0x194         // proxy bottom / top above the position: radius = (top - bottom) / 2,
+#define OFS_DESC_PROXY_HI  0x198         //   centre = bottom + radius (0x008E7907 = Xbox 0x829E6AB0)
 #define OFS_CHR_STATE      0x310         // current state (its class = the move state)
 #define OFS_CHR_STATDESC   0x410         // the stat table 0x00782EF3 caches (getMaxHealth's scale reads it)
 #define OFS_CHR_STATS      0x330         // stats: +0 HitPoints (float), +0x18 level, +0x30 damage, +0x8C max HP
@@ -70,7 +74,10 @@ int g_monWho;            // MW_*
 
 enum { MK_NONE = 0, MK_MONSTER, MK_NPC, MK_PLAYER };
 static const float kRangeM[] = {10, 20, 30, 50, 75, 100, 150, 0};  // 0 = unlimited
-static const float kUnitsPerM = 32.81f;  // 1 unit = 0.03048 m (Xbox notes: Havok scale) [hypothesis]
+// 1 unit = 1 cm: door triggers 250 high, camera 195 behind the player, gravity ~1000 units/s^2 (log v0.10; the
+// Xbox notes' 0.03048 m was wrong)
+static const float kUnitsPerM = 100.0f;
+static const float kDefaultTop = 200.0f;  // no usable proxy top: 2 m
 static const int kMaxItems = 2048, kMaxNodes = 65536, kMaxLabels = 48;
 static const DWORD kStatsMs = 5000;
 
@@ -92,6 +99,7 @@ static int s_numItems;
 
 struct MStats {
     int chars, monsters, npcs, players, evms, nodes, badNodes, broken, longList, overflow, inRange, drawn, overlap;
+    int noVt, oddGetter, badCls, notChar, noPos;  // why objects of the actor list were skipped
 };
 static MStats s_st;
 
@@ -137,7 +145,7 @@ static const char *const kFakeNames[] = {"Actor", "Character", "NPC", "Monster",
                                          "AIBehavior", "Skel_A01", "Ghoul_07", "Ghoul_08", "Skel_Far", "Behind_01",
                                          "Vulgrim", "Death", "Coin_03", "Attack_Slash", "Slash", "Leap"};
 enum { FN_OBJ = FC_COUNT, FN_SUB = FN_OBJ + 8, FN_SLASH, FN_LEAP };
-static void *s_fvCls[0x40 / 4], *s_fvObj[0x300 / 4], *s_fvSmall[0x40 / 4];
+static void *s_fvCls[0x40 / 4], *s_fvCls2[0x40 / 4], *s_fvObj[0x300 / 4], *s_fvSmall[0x40 / 4];  // Cls2: scripted
 static __declspec(align(16)) BYTE s_fCls[FC_COUNT][0x80];
 static const int kFakeObjs = 9, kFakeBig = 300;
 static __declspec(align(16)) BYTE s_fObj[kFakeObjs][0xD00];
@@ -156,7 +164,7 @@ static int s_fakeWorld = 1;
 static bool s_fakeBuilt;
 static float s_fO[3] = {100, 200, 300}, s_fF[2] = {1, 0};  // camera at cmd 17 (horizontal forward)
 // forward, right, up (relative to the camera) of the fake objects
-static const float kFakeLocal[kFakeObjs][3] = {{600, 0, -60}, {700, -150, -60}, {700, -162, -58}, {1400, 150, -60},
+static const float kFakeLocal[kFakeObjs][3] = {{600, 0, -60}, {700, -150, -60}, {700, -162, -58}, {4500, 150, -60},
                                                {-600, 0, -60}, {500, 120, -60}, {300, 0, -80}, {550, 60, -60},
                                                {0, 0, 0}};
 static void FakePlace(BYTE *o, float a, float b, float c)
@@ -213,7 +221,8 @@ static void FakeObj(int i, BYTE *o, BYTE *st, BYTE *desc, int cls, int name, flo
     }
     if (desc) {
         memset(desc, 0, 0x200);
-        *(float *)(desc + OFS_DESC_HEIGHT) = h;
+        *(float *)(desc + OFS_DESC_HEIGHT) = 20.0f;  // like the player in the game: not the body height
+        *(float *)(desc + OFS_DESC_PROXY_HI) = h;    // the proxy top
         *(BYTE **)(o + OFS_CHR_DESC) = desc;
     }
     (void)i;
@@ -229,11 +238,15 @@ static void FakeBuild()
         s_fvObj[VT_GETNAME / 4] = (void *)FakeGetName;
         s_fvObj[VT_GETPOS / 4] = (void *)FakeGetPos;
         s_fvSmall[VT_GETCLASS / 4] = (void *)FakeGetClassSmall;
+        s_fvCls[8 / 4] = (void *)(UINT_PTR)PC_CLS_GETNAME;  // like the game: both class vtables share these methods
+        s_fvCls[0x10 / 4] = (void *)(UINT_PTR)PC_CLS_ISKINDOF;
+        memcpy(s_fvCls2, s_fvCls, sizeof(s_fvCls2));
+        s_fvCls2[0] = (void *)(UINT_PTR)0x7D100000;
         static const int kParent[FC_COUNT] = {-1, FC_ACTOR, FC_CHARACTER, FC_NPC, FC_MONSTER, FC_MONSTER, FC_NPC,
                                               FC_CHARACTER, FC_PLAYER, FC_ACTOR, -1, -1, -1};
         for (int c = 0; c < FC_COUNT; c++) {
             memset(s_fCls[c], 0, 0x80);
-            *(void ***)s_fCls[c] = s_fvCls;
+            *(void ***)s_fCls[c] = (c == FC_SKEL || c == FC_GHOUL) ? s_fvCls2 : s_fvCls;  // scripted monster classes
             *(void **)(s_fCls[c] + OFS_CLS_PARENT) = kParent[c] >= 0 ? s_fCls[kParent[c]] : NULL;
             FakeName(s_fCls[c] + OFS_CLS_NAME, c);
         }
@@ -328,7 +341,7 @@ static void FakeBuild()
 // ======================= access helpers (real or fake) =======================
 static bool VtOk(void *vt)
 {
-    if (Fake()) return vt == s_fvObj || vt == s_fvSmall || vt == s_fvCls;
+    if (Fake()) return vt == s_fvObj || vt == s_fvSmall || vt == s_fvCls || vt == s_fvCls2;
     return InImage(vt);
 }
 static bool FnOk(void *fn)
@@ -343,10 +356,20 @@ static bool PosFnOk(void *fn)
 {
     if (Fake()) return fn == (void *)FakeGetPos;
     if (fn == (void *)(UINT_PTR)0x00885362u || fn == (void *)(UINT_PTR)0x008EF6B2u) return true;
+    s_st.noPos++;
     if (LogBudget(&s_oddPosBudget, 20)) Log("monsters: getPos %08X is not a known one -> skipped", (unsigned)(UINT_PTR)fn);
     return false;
 }
-static void *ClassVt() { return Fake() ? (void *)s_fvCls : (void *)(UINT_PTR)PC_VT_CLASS; }
+// a class descriptor: vt[8] getName and vt[0x10] isKindOf of the base class (both the native class vt 0x0116228C and
+// the scripted class vt 0x01166A08 have them; v0.10 checked only the first one -> no scripted monster was found)
+static bool ClassDescOk(void *cls)
+{
+    void **vt = *(void ***)cls;
+    if (Fake() ? (vt != (void **)s_fvCls && vt != (void **)s_fvCls2) : !InImage(vt)) return false;
+    return vt[8 / 4] == (void *)(UINT_PTR)PC_CLS_GETNAME && vt[0x10 / 4] == (void *)(UINT_PTR)PC_CLS_ISKINDOF;
+}
+static void *s_badClsVt[8];
+static int s_nBadClsVt;
 static CStr_t CStrFn() { return Fake() ? FakeCStr : (CStr_t)(UINT_PTR)PC_NAME_CSTR; }
 static BYTE *UpdateFlag() { return Fake() ? &s_fakeFlag : (BYTE *)(UINT_PTR)PC_UPDATE_FLAG; }
 
@@ -381,11 +404,25 @@ static bool PlainGetter(void *fn)
 static void *ClassOf(void *obj)
 {
     void **vt = *(void ***)obj;
-    if (!VtOk(vt)) return NULL;
+    if (!VtOk(vt)) {
+        s_st.noVt++;
+        return NULL;
+    }
     void *fn = vt[VT_GETCLASS / 4];
-    if (!FnOk(fn) || !PlainGetter(fn)) return NULL;
+    if (!FnOk(fn) || !PlainGetter(fn)) {
+        s_st.oddGetter++;
+        return NULL;
+    }
     void *cls = ((GetPtr_t)fn)(obj, NULL);
-    if (!cls || *(void **)cls != ClassVt()) return NULL;
+    if (!cls) return NULL;
+    if (!ClassDescOk(cls)) {
+        s_st.badCls++;
+        void *cv = *(void **)cls;
+        bool seen = false;
+        for (int i = 0; i < s_nBadClsVt; i++) seen |= s_badClsVt[i] == cv;
+        if (!seen && s_nBadClsVt < 8) s_badClsVt[s_nBadClsVt++] = cv;
+        return NULL;
+    }
     return cls;
 }
 
@@ -519,17 +556,30 @@ static bool Project(const float *p, float *sx, float *sy)
 }
 
 // ======================= collect =======================
-static float DescHeight(void *obj)
+// the top of the character proxy above its position (desc +0x198); 0 = unknown -> kDefaultTop is used
+static bool DescProxy(void *obj, float *h, float *lo, float *hi)
 {
     __try {
         BYTE *desc = *(BYTE **)((BYTE *)obj + OFS_CHR_DESC);  // raw: never create it ourselves
-        if (!desc) return 0;
-        float h = *(float *)(desc + OFS_DESC_HEIGHT);
-        return (_finite(h) && h > 5.0f && h < 5000.0f) ? h : 0;
+        if (!desc) return false;
+        *h = *(float *)(desc + OFS_DESC_HEIGHT);
+        *lo = *(float *)(desc + OFS_DESC_PROXY_LO);
+        *hi = *(float *)(desc + OFS_DESC_PROXY_HI);
+        return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        return 0;
+        return false;
     }
 }
+static float DescHeight(void *obj)
+{
+    float h, lo, hi;
+    if (!DescProxy(obj, &h, &lo, &hi)) return 0;
+    return (_finite(hi) && hi > 30.0f && hi < 5000.0f) ? hi : 0;
+}
+
+static bool s_diag;               // the collection after "info ON": remember the classes that are not characters
+static void *s_diagCls[24];
+static int s_nDiagCls;
 
 // 1 = added, 0 = skipped, -1 = exception in the object, -2 = the node is unreadable
 static int ReadNode(BYTE *node, BYTE **next)
@@ -547,7 +597,15 @@ static int ReadNode(BYTE *node, BYTE **next)
         void *cls = ClassOf(obj);
         if (!cls) return 0;
         int kind = KindOf(cls);
-        if (kind == MK_NONE) return 0;
+        if (kind == MK_NONE) {
+            s_st.notChar++;
+            if (s_diag && s_nDiagCls < 24) {
+                bool seen = false;
+                for (int i = 0; i < s_nDiagCls; i++) seen |= s_diagCls[i] == cls;
+                if (!seen) s_diagCls[s_nDiagCls++] = cls;
+            }
+            return 0;
+        }
         s_st.chars++;
         if (kind == MK_MONSTER) s_st.monsters++;
         else if (kind == MK_NPC) s_st.npcs++;
@@ -772,6 +830,7 @@ static void DmgUpdate(const MItem &it, const MInfo &mi)
 
 // ======================= flags: freeze (0x014D4278) and DamageIndicators (options +0x2F) =======================
 static bool s_freezeOn;         // the flag is 0 because of us
+static float s_freezeHpPrev;    // the player's HP last frame while frozen
 static void *s_freezeWorld;
 static bool s_freezeChecked, s_freezeOk;
 static bool s_dmgOn;            // options +0x2F forced by us
@@ -843,9 +902,17 @@ static void FreezeSet(bool on, const char *why)
         BYTE *f = UpdateFlag();
         BYTE before = *f;
         if (on) {
+            float hp = 0;
+            if (PlayerHp(&hp) && hp <= 0) {  // dead now (death screen): nothing to freeze for
+                g_monFreeze = false;
+                Log("monsters: freeze refused: player HP %.1f (dead)", hp);
+                Menu_Status("freeze monsters: the player is dead");
+                return;
+            }
             *f = 0;
             s_freezeOn = true;
             s_freezeWorld = CurrentWorld();
+            s_freezeHpPrev = hp;
         } else {
             *f = 1;
             s_freezeOn = false;
@@ -958,13 +1025,17 @@ void Mon_Frame()
 {
     if (!g_gameMatch && !g_testMode) return;
     ApplyFlags(NULL);
-    if (s_freezeOn) {  // off by itself: level load, the player's death
+    if (s_freezeOn) {  // off by itself: level load, the player's death (HP going from > 0 to <= 0)
         void *w = CurrentWorld();
-        float hp;
+        float hp = 0;
+        bool hpOk = PlayerHp(&hp);
         const char *why = NULL;
         if (w != s_freezeWorld) why = "level load";
-        else if (PlayerHp(&hp) && hp <= 0) why = "the player died";
+        else if (hpOk && hp <= 0 && s_freezeHpPrev > 0) why = "the player died";
+        if (hpOk) s_freezeHpPrev = hp;
         if (why) {
+            Log("monsters: freeze off by itself (%s): player HP %.1f, world %08X -> %08X", why, hp,
+                (unsigned)(UINT_PTR)s_freezeWorld, (unsigned)(UINT_PTR)w);
             g_monFreeze = false;
             FreezeSet(false, why);
             char msg[96];
@@ -1099,26 +1170,26 @@ static int CmpDist(const void *a, const void *b)
     return da < db ? -1 : (da > db ? 1 : 0);
 }
 
-// the monster the camera looks at: the smallest angle between the view direction and the body centre, <= 12 deg;
-// the current one stays while it is within 16 deg and not 3 deg worse than the best (no flicker)
+// the monster the camera looks at: within 12 deg of the view direction (body centre), the best score = angle + 1 deg
+// per 10 m (of two at almost the same angle the nearer one wins); the current one stays while it is within 16 deg
+// and its score is not 3 worse than the best (no flicker)
+static float TargetScore(const MItem &it) { return it.aim + it.dist / kUnitsPerM * 0.1f; }
 static int PickTarget()
 {
     int best = -1, cur = -1;
     for (int i = 0; i < s_numItems; i++) {
         if (s_items[i].aim > 90) continue;
         if (s_items[i].obj == s_target) cur = i;
-        if (s_items[i].aim <= 12.0f && (best < 0 || s_items[i].aim < s_items[best].aim - 0.01f ||
-                                        (fabsf(s_items[i].aim - s_items[best].aim) < 0.01f &&
-                                         s_items[i].dist < s_items[best].dist)))
-            best = i;
+        if (s_items[i].aim <= 12.0f && (best < 0 || TargetScore(s_items[i]) < TargetScore(s_items[best]))) best = i;
     }
-    if (cur >= 0 && s_items[cur].aim <= 16.0f && (best < 0 || s_items[cur].aim <= s_items[best].aim + 3.0f)) return cur;
+    if (cur >= 0 && s_items[cur].aim <= 16.0f && (best < 0 || TargetScore(s_items[cur]) <= TargetScore(s_items[best]) + 3.0f))
+        return cur;
     return best;
 }
 
 static void DrawTargetMark(ImDrawList *dl, const MItem &it)
 {
-    float c[3] = {it.pos.x, it.pos.y, it.pos.z + (it.height > 0 ? it.height : 150.0f) * 0.5f}, x, y;
+    float c[3] = {it.pos.x, it.pos.y, it.pos.z + (it.height > 0 ? it.height : kDefaultTop) * 0.5f}, x, y;
     if (!Project(c, &x, &y)) return;
     float s = 14.0f, k = 6.0f;
     ImU32 col = kTargetCol;
@@ -1186,7 +1257,7 @@ static void DrawTargetPanel(int ti)
             else ImGui::Text("target: -");
         }
     }
-    ImGui::TextDisabled("distance %.0f units (~%.1f m)  angle %.1f deg  height %.0f", it.dist, it.dist / kUnitsPerM,
+    ImGui::TextDisabled("distance %.0f units (%.1f m)  angle %.1f deg  top %.0f", it.dist, it.dist / kUnitsPerM,
                         it.aim, it.height);
     if (g_monLevel >= 3) ImGui::TextDisabled("pos (%.1f %.1f %.1f)", it.pos.x, it.pos.y, it.pos.z);
     if (g_monDamage) {
@@ -1251,6 +1322,24 @@ static void LogFields(const char *why)
         why, s_st.evms, s_st.nodes, s_st.chars, s_st.monsters, s_st.npcs, s_st.players, s_numItems, s_st.badNodes,
         s_st.broken, s_st.longList, s_st.overflow, (unsigned)(UINT_PTR)s_clsMonster, (unsigned)(UINT_PTR)s_clsNpc,
         (unsigned)(UINT_PTR)s_clsPlayer);
+    Log("monsters:   skipped: no vtable %d, odd getClass %d, not a class descriptor %d, not a character %d, unknown "
+        "getPos %d", s_st.noVt, s_st.oddGetter, s_st.badCls, s_st.notChar, s_st.noPos);
+    for (int i = 0; i < s_nBadClsVt; i++)
+        Log("monsters:   class object with vt %08X (not a class descriptor)", (unsigned)(UINT_PTR)s_badClsVt[i]);
+    for (int i = 0; i < s_nDiagCls; i++) {
+        char chain[200] = "";
+        __try {
+            void *c = s_diagCls[i];
+            for (int d = 0; c && d < 10; d++) {
+                if (d) strncat_s(chain, sizeof(chain), " > ", _TRUNCATE);
+                strncat_s(chain, sizeof(chain), ClassName(c), _TRUNCATE);
+                c = *(void **)((BYTE *)c + OFS_CLS_PARENT);
+            }
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+        }
+        Log("monsters:   not a character: class %08X vt %08X: %s", (unsigned)(UINT_PTR)s_diagCls[i],
+            (unsigned)(UINT_PTR) * (void **)s_diagCls[i], chain);
+    }
     for (int j = 0; j < ncc; j++) {
         char chain[160] = "";
         __try {
@@ -1267,8 +1356,16 @@ static void LogFields(const char *why)
     if (!Fake()) {  // the player's proxy height: Death is about 2 m tall -> units per metre (range, distances)
         void *game = NULL, *actor = NULL;
         if (Game_GetGame(&game) && game && Game_GetActor(game, &actor) && actor)
-            Log("monsters:   player proxy height %.1f units (with 1 m = %.1f units: %.2f m)", DescHeight(actor),
-                kUnitsPerM, DescHeight(actor) / kUnitsPerM);
+        {
+            float h = 0, lo = 0, hi = 0, hp = 0;
+            GameVec pp = {0};
+            DescProxy(actor, &h, &lo, &hi);
+            Game_ActorGetPos(actor, &pp);
+            PlayerHp(&hp);
+            Log("monsters:   player: proxy +0x190 %.1f, bottom +0x194 %.1f, top +0x198 %.1f (1 m = %.0f units) | pos "
+                "(%.0f %.0f %.0f) camera (%.0f %.0f %.0f) | HP %.1f", h, lo, hi, kUnitsPerM, pp.x, pp.y, pp.z,
+                s_cam[12], s_cam[13], s_cam[14], hp);
+        }
     }
     for (int i = 0, shown = 0; i < s_numItems && shown < 4; i++) {
         const MItem &it = s_items[i];
@@ -1304,6 +1401,8 @@ static void DrawInner()
         TurnOff("no class descriptors");
         return;
     }
+    s_diag = s_logOnEnable;
+    if (s_diag) s_nDiagCls = 0, s_nBadClsVt = 0;
     __try {
         CollectInner();
     } __except (CatchMon("monster collection", GetExceptionInformation())) {
@@ -1318,7 +1417,7 @@ static void DrawInner()
     int order[kMaxItems], no = 0;
     for (int i = 0; i < s_numItems; i++) {
         MItem &it = s_items[i];
-        float h = it.height > 0 ? it.height : 150.0f;
+        float h = it.height > 0 ? it.height : kDefaultTop;
         float c[3] = {it.pos.x, it.pos.y, it.pos.z + h * 0.5f};
         float d[3] = {c[0] - cp[0], c[1] - cp[1], c[2] - cp[2]};
         it.dist = sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
