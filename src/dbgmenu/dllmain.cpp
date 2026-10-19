@@ -140,6 +140,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         Input_Init();
         if (g_gameMatch || g_testMode) {
             if (g_testMode) Log("TEST MODE (DBGMENU_TEST=1): hooks installed without the game");
+            Keys_Load();  // task 10: dbgmenu_keys.ini next to the DLL; the debug menu starts OFF (F10)
             Hooks_Install();
         } else {
             Log("unknown exe: hooks NOT installed, proxy only");
@@ -172,11 +173,13 @@ extern "C" HRESULT WINAPI Proxy_DllUnregisterServer(void) { return p_DllUnregist
 extern "C" LPCVOID WINAPI Proxy_GetdfDIJoystick(void) { return p_GetdfDIJoystick ? p_GetdfDIJoystick() : NULL; }
 
 // Offline test harness only (does nothing in the game): 1..4, 7 fake game state, 5 = exception in the flight frame,
-// 6 = log the simulated cursor state, 8..11, 13 triggers (projection check, empty / broken / normal fake list, exception).
+// 6 = log the simulated cursor state, 8..11, 13 triggers (projection check, empty / broken / normal fake list, exception),
+// 16 = read dbgmenu_keys.ini again (task 10).
 extern "C" void __cdecl DbgMenuTest(int cmd)
 {
     if (!g_testMode || g_gameMatch) return;
-    if (cmd == 5) Flight_TestThrow();
+    if (cmd == 16) Keys_Load();
+    else if (cmd == 5) Flight_TestThrow();
     else if (cmd == 6) Cursor_TestLog("check");
     else if ((cmd >= 8 && cmd <= 11) || cmd == 13 || cmd == 14 || cmd == 15) Trig_TestControl(cmd);
     else Game_TestControl(cmd);

@@ -21,6 +21,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l)
     }
     if (m == WM_KEYDOWN) printf("  game WndProc got WM_KEYDOWN %02X\n", (unsigned)w);
     if (m == WM_KEYUP) printf("  game WndProc got WM_KEYUP %02X\n", (unsigned)w);
+    if (m == WM_SYSKEYDOWN) printf("  game WndProc got WM_SYSKEYDOWN %02X\n", (unsigned)w);
     if (m == WM_LBUTTONDOWN) printf("  game WndProc got WM_LBUTTONDOWN\n");
     if (m == WM_RBUTTONDOWN) printf("  game WndProc got WM_RBUTTONDOWN\n");
     if (m == WM_MOUSEMOVE) printf("  game WndProc got WM_MOUSEMOVE\n");
@@ -73,6 +74,11 @@ static void Key(int vk)
     PostMessageA(g_wnd, WM_KEYDOWN, vk, 1);
     PostMessageA(g_wnd, WM_KEYUP, vk, 0xC0000001);
 }
+static void SysKey(int vk)  // F10 comes as WM_SYSKEYDOWN in Windows
+{
+    PostMessageA(g_wnd, WM_SYSKEYDOWN, vk, 1);
+    PostMessageA(g_wnd, WM_SYSKEYUP, vk, 0xC0000001);
+}
 static void KeyDown(int vk) { PostMessageA(g_wnd, WM_KEYDOWN, vk, 1); }
 static void KeyUp(int vk) { PostMessageA(g_wnd, WM_KEYUP, vk, 0xC0000001); }
 static void Mouse(int x, int y) { PostMessageA(g_wnd, WM_MOUSEMOVE, 0, MAKELPARAM(x, y)); }
@@ -111,6 +117,29 @@ static void Ctl(int cmd)
 }
 static void Say(const char *s) { printf("== %s\n", s); }
 
+// task 10: the keys file next to the DLL (= the current folder)
+static const char *kKeysFile = "dbgmenu_keys.ini";
+static void PrintFile()
+{
+    char line[256];
+    FILE *f = fopen(kKeysFile, "r");
+    printf("  --- %s ---\n", kKeysFile);
+    if (!f) {
+        printf("  (missing)\n");
+        return;
+    }
+    while (fgets(line, sizeof(line), f))
+        if (line[0] != ';') printf("  | %s", line);
+    fclose(f);
+}
+static void WriteFile(const char *text)
+{
+    FILE *f = fopen(kKeysFile, "w");
+    fputs(text, f);
+    fclose(f);
+    printf("  wrote %s:\n%s", kKeysFile, text);
+}
+
 int main()
 {
     setvbuf(stdout, NULL, _IONBF, 0);
@@ -118,6 +147,8 @@ int main()
     HMODULE dll = LoadLibraryA(".\\dinput8.dll");
     printf("dinput8.dll %p\n", (void *)dll);
     if (!dll) return 1;
+    Say("10a: keys file after the DLL loaded (created with the defaults if it was missing)");
+    PrintFile();
 
     WNDCLASSEXA wc = {sizeof(wc)};
     wc.lpfnWndProc = WndProc;
@@ -131,14 +162,18 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1540; frame++) {
+    for (int frame = 1; frame <= 1665; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
             DispatchMessageA(&msg);
         }
         switch (frame) {
+        // ---- task 10: the debug menu starts OFF: F1/F2/F3 reach the game, nothing on screen; F10 turns it on ----
+        case 1: Say("10a: debug off: F1, F2, F3 must reach the game"); Key(VK_F1); Key(VK_F2); Key(VK_F3); break;
+        case 2: Snapshot("shot0.bmp"); break;
         case 3: Key('W'); break;                            // menu closed: must reach the game
+        case 4: Say("10a: F10 (WM_SYSKEYDOWN): debug on, not to the game"); SysKey(VK_F10); break;
         case 5: Key(VK_F1); break;                          // open
         case 8: Key(VK_DOWN); Key(VK_DOWN); break;          // playerFly -> Triggers -> Camera
         case 11: Key(VK_RETURN); break;                     // enter category
@@ -217,7 +252,7 @@ int main()
         case 383: Key(VK_RETURN); break;
         case 390: Key(VK_F2); break;
         case 395: Key(VK_F2); break;
-        case 400: Say("menu: playerFly -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;  // 09: 3 new items before it
+        case 400: Say("menu: playerFly -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;  // 09: 3 new items before it; 10: Menu -> Keys -> playerFly
         case 402: Snapshot("shot8.bmp"); break;
         case 404: Key(VK_F1); break;
         case 410: Say("hover off: teleport -> falls at once"); Key(VK_F2); break;
@@ -404,7 +439,68 @@ int main()
         case 1522: Snapshot("shot37.bmp"); break;
         case 1524: Click(); break;
         case 1530: Key(VK_SPACE); break;
-        case 1535: Say("final cursor state: released"); Ctl(6); break;
+        case 1535: Say("cursor state: released"); Ctl(6); break;
+        // ---- task 10: F10 master switch, menu Keys, dbgmenu_keys.ini ----
+        case 1540: Say("10b: showCameraPosition on, F3 triggers on, F2 flight, R carried, F1 menu open");
+            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); break;
+        case 1542: Key(VK_F1); break;
+        case 1543: Key(VK_F3); break;
+        case 1545: Key(VK_F2); break;
+        case 1548: Key('R'); break;
+        case 1551: Key(VK_F1); break;
+        case 1553: Snapshot("shot38.bmp"); break;
+        case 1555: Say("10b: F10 in flight: menu closed, the carried player stays (hover), triggers + panel off"); SysKey(VK_F10); break;
+        case 1558: Snapshot("shot39.bmp"); break;
+        case 1560: Say("10b: debug off: F1, F2, F3 reach the game, no flight, the hover stays"); Key(VK_F1); Key(VK_F2); Key(VK_F3); break;
+        case 1562: Say("10b: T is a game key now: reaches the game and releases the hover"); Key('T'); break;
+        case 1566: Snapshot("shot40.bmp"); break;
+        case 1570: Say("10c: F10 on: only the label; triggers / panel stay off"); SysKey(VK_F10); break;
+        case 1573: Snapshot("shot41.bmp"); break;
+        case 1575: Say("10d: menu Keys > menu: Enter -> waiting for a key");
+            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1578: Snapshot("shot42.bmp"); break;
+        case 1580: Say("10d: Space, W, left click: key not allowed"); Key(VK_SPACE); break;
+        case 1582: Key('W'); break;
+        case 1584: Click(); break;
+        case 1586: Snapshot("shot43.bmp"); break;
+        case 1588: Say("10d: F5 -> menu = F5"); Key(VK_F5); break;
+        case 1590: Snapshot("shot44.bmp"); break;
+        case 1592: Say("10d: F5 closes the menu; F1 now reaches the game"); Key(VK_F5); Key(VK_F1); break;
+        case 1595: Say("10d: Keys > playerFly = F5: conflict, swapped (menu = F2)"); Key(VK_F5); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1597: Key(VK_F5); break;
+        case 1599: Snapshot("shot45.bmp"); break;
+        case 1601: Say("10d: attach = Y, time = R"); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1603: Key('Y'); break;
+        case 1604: Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1606: Key('R'); break;
+        case 1608: Say("10e: the file after the changes"); PrintFile(); break;
+        case 1610: Say("10e: F2 closes the menu, F5 flight, Y carried, T nothing, R time frozen"); Key(VK_F2); break;
+        case 1612: Key(VK_F5); break;
+        case 1615: Key('Y'); break;
+        case 1617: Key('T'); break;
+        case 1618: Key('R'); break;
+        case 1620: Snapshot("shot46.bmp"); break;
+        case 1622: Say("10e: F5: the carried player stays, hover"); Key(VK_F5); break;
+        case 1624: Snapshot("shot47.bmp"); break;
+        case 1626: KeyDown(VK_SPACE); break;
+        case 1628: KeyUp(VK_SPACE); break;
+        case 1630: Say("10f: a broken file, read again (cmd 16)");
+            WriteFile("; test\ndebug = F11\nmenu = Space\nplayerFly = F7\nshowTriggers = f7\nattach = Blah\n"
+                      "this line is garbage\ntime = q ; comment\ntime = Z\nunknown = F9\n");
+            Ctl(16); PrintFile(); break;
+        case 1632: Say("10f: F10 is no longer ours -> the game; F11 off, F11 on"); SysKey(VK_F10); break;
+        case 1634: Key(VK_F11); break;
+        case 1635: Key(VK_F1); break;
+        case 1636: Key(VK_F11); break;
+        case 1640: Say("10g: file with only menu = F2: playerFly gets the free default F1");
+            WriteFile("menu = F2\n"); Ctl(16); break;
+        case 1643: Say("10g: F2 opens the menu; Keys > reset to defaults"); Key(VK_F2); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1645: Snapshot("shot48.bmp"); break;
+        case 1647: Key(VK_F1); PrintFile(); break;
+        case 1650: Say("10g: read again: no problems"); Ctl(16); break;
+        case 1652: Say("10h: F10 off, F1 reaches the game"); SysKey(VK_F10); break;
+        case 1654: Key(VK_F1); break;
+        case 1660: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

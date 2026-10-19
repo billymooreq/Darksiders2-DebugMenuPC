@@ -36,6 +36,8 @@
 //     one frame moves him at most kAttachMaxStep (the phantom overlap is only tested at the frame's position).
 //     F2 with the player carried = a teleport to where he is (hover, camera behind him); Enter / click = the usual
 //     teleport to the camera. The game moving him far by itself (death / respawn / cutscene) lets him go.
+// Task 10: F10 off ends a flight like F2 (Flight_RequestStop: never starts one); a flight starts only while the
+// debug menu is on. The keys R / T are the player's choice (keys.cpp).
 #include "common.h"
 #include <math.h>
 #include <float.h>
@@ -180,6 +182,7 @@ bool Flight_GetCamPos(GameVec *out)
 }
 
 void Flight_RequestToggle() { InterlockedExchange(&s_reqToggle, 1); }
+void Flight_RequestStop() { InterlockedExchange(&s_reqToggle, 2); }  // task 10: F10 off
 void Flight_RequestTeleport()
 {
     static volatile LONG budget;
@@ -792,7 +795,7 @@ static void Enter()
     float len = sqrtf(Dot3(f, f));
     if (!(len > 0.5f && len < 2.0f)) return Unavailable("camera matrix row 2 is not a unit vector");
 
-    HoverStop("F2 -> playerFly");
+    HoverStop("playerFly key -> flight");
     if (s_blend.active) s_blend.active = false;
     DWORD flags = 0;
     s_pause0 = s_pause1 = -1;
@@ -1024,11 +1027,14 @@ static void Teleport()
     FinishAt(target, dir, "teleport");
 }
 
-// F2 / menu: with the player carried he stays where he is, else back to the game camera
-static void ToggleOff()
+// F2 / menu (task 10: also F10 off): with the player carried he stays where he is, else back to the game camera
+static void ToggleOff(bool debugOff)
 {
-    if (!s_att.active) return Exit("F2 / menu", false);
-    StayCarried("F2 - the carried player stays there");
+    char how[96];  // task 10: the keys are the player's choice
+    if (debugOff) sprintf_s(how, "%s - debug off%s", Keys_KeyName(KA_DEBUG), s_att.active ? ", the carried player stays there" : "");
+    else sprintf_s(how, s_att.active ? "%s - the carried player stays there" : "%s / menu", Keys_KeyName(KA_FLY));
+    if (!s_att.active) return Exit(how, false);
+    StayCarried(how);
 }
 
 // T / menu freeze time in flight; R / menu attach player (game thread, flying, objects validated)
@@ -1039,7 +1045,7 @@ static void TimeAndAttachRequests()
         bool want = t == 1 ? !s_pausedByUs : t == 3;
         if (want != s_pausedByUs) {
             s_timeSwitches++;
-            const char *why = t == 1 ? "T" : "menu";
+            const char *why = t == 1 ? Keys_KeyName(KA_TIME) : "menu";
             if (want) PauseOn(s_game, why);
             else PauseOff(s_game, why, true);
             Menu_Status(want && !s_pausedByUs ? "time: cannot be frozen here" : "time: %s", TimeName());
@@ -1048,10 +1054,10 @@ static void TimeAndAttachRequests()
     if (r) {
         bool want = r == 1 ? !s_att.active : r == 3;
         if (want && !s_att.active) {
-            AttachStart(r == 1 ? "R" : "menu");
+            AttachStart(r == 1 ? Keys_KeyName(KA_ATTACH) : "menu");
             if (s_att.active) Menu_Status("attach: on (distance %.0f)", g_attachDist);
         } else if (!want && s_att.active) {
-            AttachStop(r == 1 ? "R" : "menu");
+            AttachStop(r == 1 ? Keys_KeyName(KA_ATTACH) : "menu");
             Menu_Status("attach: off (the player falls from here)");
         }
     }
@@ -1088,9 +1094,13 @@ static void FrameInner()
     ReleaseProbe();
     CamProbe();
     if (InterlockedExchange(&s_reqAbort, 0) && g_flying) Exit(s_abortWhy ? s_abortWhy : "abort", true);
-    if (InterlockedExchange(&s_reqToggle, 0)) {
-        if (!g_flying) Enter();
-        else if (Validate()) ToggleOff();
+    LONG toggle = InterlockedExchange(&s_reqToggle, 0);
+    if (toggle) {
+        if (!g_flying) {
+            if (toggle == 1 && g_debugOn) Enter();  // 2 = F10 off: never starts a flight
+        } else if (Validate()) {
+            ToggleOff(toggle == 2);
+        }
     }
     if (!g_flying) {
         InterlockedExchange(&s_reqTeleport, 0);

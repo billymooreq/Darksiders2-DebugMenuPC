@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.8.1 (task 09)"
+#define DBGMENU_VERSION "dbgmenu v0.9 (task 10)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -67,6 +67,24 @@ void Menu_Draw();
 void Info_Draw();
 bool Menu_WantsDraw();
 void Menu_Status(const char *fmt, ...);
+void Menu_OnDebugSwitch(bool on);  // task 10: F10 on / off (status cleared, key capture cancelled)
+
+// ---- keys.cpp: task 10, the master switch (F10) and the hotkeys the player can change (dbgmenu_keys.ini) ----
+enum KeyAction { KA_NONE = 0, KA_DEBUG, KA_MENU, KA_FLY, KA_TRIGGERS, KA_ATTACH, KA_TIME, KA_COUNT };
+enum { KQ_CAPTURE = 0x1000, KQ_ACTION = 0x2000 };  // key queue: a key for the menu Keys / a hotkey that was run
+extern volatile LONG g_debugOn;     // the debug menu is on (off after the game starts)
+extern volatile LONG g_keyCapture;  // menu Keys waits for a new key (the action), 0 = no
+void Keys_Load();                   // read the file (create it with the defaults when missing)
+int Keys_Get(int action);           // virtual key
+const char *Keys_KeyName(int action);  // "F1"
+const char *Keys_Label(int action);    // "menu", "attach (in flight)"
+const char *Keys_Name(int vk);      // any key, also the forbidden ones ("Space")
+bool Keys_Allowed(int vk);
+int Keys_HotkeyNow(int vk);         // KA_DEBUG always; KA_MENU / KA_FLY / KA_TRIGGERS while the debug menu is on
+bool Keys_Assign(int action, int vk, int *swapped);  // false = not allowed; writes the file
+void Keys_ResetDefaults();          // writes the file
+const char *Keys_FilePath();
+void Debug_Toggle(const char *why); // F10: on / everything off
 
 // ---- game.cpp: guarded reads of game objects ----
 struct GameVec { float x, y, z, w; };
@@ -157,6 +175,7 @@ extern float g_attachDist;         // task 09: menu playerFly -> attach distance
 extern volatile LONG g_flying;
 void Flight_Frame();                       // once per game frame, game thread
 void Flight_RequestToggle();               // F2 / menu
+void Flight_RequestStop();                 // task 10: F10 off - like F2, but never starts a flight
 void Flight_RequestTeleport();             // Enter / left mouse button while flying
 void Flight_RequestTime(int mode);         // task 09: T (-1 = switch) / menu (0 = run, 1 = freeze) while flying
 void Flight_RequestAttach(int mode);       // task 09: R (-1 = switch) / menu (0 = off, 1 = on) while flying

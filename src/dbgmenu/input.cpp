@@ -11,6 +11,9 @@
 // the window no longer ends the flight - it freezes it, every held key/button is forgotten and the cursor is
 // released at once; the hover after a teleport ends at the first game control key/button pressed (Input_HoverKey).
 // Task 09: T (time) and R (attach the player) while flying, from WM_KEYDOWN like Enter; the game never sees them.
+// Task 10: the hotkeys come from keys.cpp (the player can change them). The debug key (F10) is always ours; the
+// menu / playerFly / Show triggers keys only while the debug menu is on - while it is off the game gets them like
+// any other key. While the menu Keys waits for a new key, the next key press (or mouse button) goes to it only.
 #include "common.h"
 
 volatile LONG g_menuOpen;
@@ -55,12 +58,13 @@ bool Input_WindowActive()
 
 DWORD Input_ActiveForMs() { return GetTickCount() - s_activeSince; }
 
-// not hero controls: F-keys (our hotkeys among them), Esc, Alt / Win / Tab (Alt+Tab), Print Screen, media keys
+// not hero controls: F-keys, our hotkeys (task 10: may be letters), Esc, Alt / Win / Tab (Alt+Tab), Print Screen,
+// media keys
 static bool HoverExcluded(int vk)
 {
     return vk <= 0 || vk >= 0xFF || (vk >= VK_F1 && vk <= VK_F24) || vk == VK_ESCAPE || vk == VK_MENU ||
            vk == VK_LMENU || vk == VK_RMENU || vk == VK_LWIN || vk == VK_RWIN || vk == VK_APPS || vk == VK_TAB ||
-           vk == VK_SNAPSHOT || vk == VK_PAUSE || (vk >= 0xA6 && vk <= 0xB7);
+           vk == VK_SNAPSHOT || vk == VK_PAUSE || (vk >= 0xA6 && vk <= 0xB7) || Keys_HotkeyNow(vk);
 }
 
 void Input_HoverArm()
@@ -161,7 +165,30 @@ void Input_UpdateBlock()
     InterlockedExchange(&g_inputBlocked, (g_menuOpen || g_flying) ? 1 : 0);
 }
 
-static bool IsHotkey(int vk) { return vk == VK_F1 || vk == VK_F2 || vk == VK_F3; }
+static bool Capturing() { return g_keyCapture && g_menuOpen; }
+
+// a hotkey press (not a repeat): run it here, the menu thread logs it
+static void RunHotkey(int act)
+{
+    switch (act) {
+    case KA_DEBUG: Debug_Toggle(Keys_KeyName(KA_DEBUG)); break;
+    case KA_MENU:
+        if (g_overlayReady || g_menuOpen) Input_SetMenuOpen(!g_menuOpen);
+        break;
+    case KA_FLY: Flight_RequestToggle(); break;  // executed by the next game frame
+    case KA_TRIGGERS:
+        if (g_overlayReady) Trig_Toggle();  // task 07: Show triggers
+        break;
+    }
+    PushKey(KQ_ACTION | act);
+}
+
+// menu Keys waits for a key: a mouse button is offered too (to say "not allowed")
+static void CaptureButton(int vk)
+{
+    if (Capturing()) PushKey(KQ_CAPTURE | vk);
+}
+
 static bool IsMenuKey(int vk)
 {
     return vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT || vk == VK_RETURN || vk == VK_ESCAPE ||
@@ -205,29 +232,32 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
         bool repeat = (l & 0x40000000) != 0;
         if (LogBudget(&firstKey, 1)) Log("input: first WM_KEYDOWN vk=%02X (legacy keyboard messages arrive)", vk);
         SetHeld(vk, true);
-        if (IsHotkey(vk)) {
-            if (!repeat) {
-                if (vk == VK_F1 && (g_overlayReady || g_menuOpen)) Input_SetMenuOpen(!g_menuOpen);
-                if (vk == VK_F2) Flight_RequestToggle();  // executed by the next game frame
-                if (vk == VK_F3 && g_overlayReady) Trig_Toggle();  // task 07: Show triggers
-                PushKey(vk);
-            }
+        if (Capturing() && !(m == WM_SYSKEYDOWN && vk == VK_F4)) {  // task 10: menu Keys; Alt+F4 still works
+            if (!repeat) PushKey(KQ_CAPTURE | vk);
             KeyMake(s_legacy, vk, true);
             return true;
         }
+        int act = Keys_HotkeyNow(vk);
+        if (act) {
+            if (!repeat) RunHotkey(act);
+            KeyMake(s_legacy, vk, true);
+            return true;
+        }
+        bool flyKeys = g_flying && g_debugOn && !g_menuOpen && !repeat;
         if (g_menuOpen && IsMenuKey(vk) && (!repeat || vk == VK_UP || vk == VK_DOWN || vk == VK_LEFT || vk == VK_RIGHT))
             PushKey(vk);
-        else if (g_flying && !g_menuOpen && m == WM_KEYDOWN && vk == VK_RETURN && !repeat)
+        else if (flyKeys && m == WM_KEYDOWN && vk == VK_RETURN)
             Flight_RequestTeleport();
-        else if (g_flying && !g_menuOpen && m == WM_KEYDOWN && !repeat && (vk == 'T' || vk == 'R')) {
-            if (vk == 'T') Flight_RequestTime(-1);  // task 09: time frozen / running
-            else Flight_RequestAttach(-1);          // task 09: carry the player / let him go
-        }
+        else if (flyKeys && vk == Keys_Get(KA_TIME))
+            Flight_RequestTime(-1);    // task 09: time frozen / running
+        else if (flyKeys && vk == Keys_Get(KA_ATTACH))
+            Flight_RequestAttach(-1);  // task 09: carry the player / let him go
         // Alt+F4 must keep working
         return KeyMake(s_legacy, vk, blocked && !(m == WM_SYSKEYDOWN && vk == VK_F4));
     }
     case WM_KEYUP:
     case WM_SYSKEYUP:
+        if ((w & 0xFF) == VK_SNAPSHOT) CaptureButton(VK_SNAPSHOT);  // Print Screen has no WM_KEYDOWN
         SetHeld((int)(w & 0xFF), false);
         return KeyBreak(s_legacy, (int)(w & 0xFF));
     case WM_ACTIVATEAPP:
@@ -251,11 +281,17 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
         return blocked;
     case WM_LBUTTONDOWN:
         SetHeld(VK_LBUTTON, true);
-        if (g_flying && !g_menuOpen) Flight_RequestTeleport();
+        CaptureButton(VK_LBUTTON);
+        if (g_flying && g_debugOn && !g_menuOpen) Flight_RequestTeleport();
         return blocked;
-    case WM_RBUTTONDOWN: SetHeld(VK_RBUTTON, true); return blocked;
-    case WM_MBUTTONDOWN: SetHeld(VK_MBUTTON, true); return blocked;
-    case WM_XBUTTONDOWN: SetHeld(HIWORD(w) == XBUTTON2 ? VK_XBUTTON2 : VK_XBUTTON1, true); return blocked;
+    case WM_RBUTTONDOWN: SetHeld(VK_RBUTTON, true); CaptureButton(VK_RBUTTON); return blocked;
+    case WM_MBUTTONDOWN: SetHeld(VK_MBUTTON, true); CaptureButton(VK_MBUTTON); return blocked;
+    case WM_XBUTTONDOWN: {
+        int vk = HIWORD(w) == XBUTTON2 ? VK_XBUTTON2 : VK_XBUTTON1;
+        SetHeld(vk, true);
+        CaptureButton(vk);
+        return blocked;
+    }
     case WM_LBUTTONUP: SetHeld(VK_LBUTTON, false); return false;
     case WM_RBUTTONUP: SetHeld(VK_RBUTTON, false); return false;
     case WM_MBUTTONUP: SetHeld(VK_MBUTTON, false); return false;
@@ -296,7 +332,8 @@ static void FilterRaw(RAWINPUT *ri, UINT size)
         if (LogBudget(&firstKb, 1)) Log("input: first raw keyboard event vk=%02X flags=%X", vk, kb.Flags);
         if (vk <= 0 || vk >= 0xFF) return;
         SetHeld(vk, !(kb.Flags & RI_KEY_BREAK));
-        bool hide = (kb.Flags & RI_KEY_BREAK) ? KeyBreak(s_raw, vk) : KeyMake(s_raw, vk, blocked || IsHotkey(vk));
+        bool hide = (kb.Flags & RI_KEY_BREAK) ? KeyBreak(s_raw, vk)
+                                               : KeyMake(s_raw, vk, blocked || Keys_HotkeyNow(vk) || Capturing());
         if (hide) {  // a release of an unused virtual key: the game ignores it
             kb.VKey = 0xFF;
             kb.MakeCode = 0;
@@ -308,7 +345,7 @@ static void FilterRaw(RAWINPUT *ri, UINT size)
         USHORT f = ms.usButtonFlags, out = 0;
         if (LogBudget(&firstMouse, 1)) Log("input: first raw mouse event flags=%X", f);
         if (!(ms.usFlags & MOUSE_MOVE_ABSOLUTE)) AddMouse(ms.lLastX, ms.lLastY);
-        if ((f & RI_MOUSE_LEFT_BUTTON_DOWN) && g_flying && !g_menuOpen) Flight_RequestTeleport();
+        if ((f & RI_MOUSE_LEFT_BUTTON_DOWN) && g_flying && g_debugOn && !g_menuOpen) Flight_RequestTeleport();
         static const int kButtonVk[5] = {VK_LBUTTON, VK_RBUTTON, VK_MBUTTON, VK_XBUTTON1, VK_XBUTTON2};
         for (int b = 0; b < 5; b++) {
             USHORT down = (USHORT)(1 << (2 * b)), up = (USHORT)(1 << (2 * b + 1)), bit = (USHORT)(1 << b);
