@@ -270,6 +270,26 @@ static void __fastcall hkHud(void *game)
     o_Hud(game);
 }
 
+// task 09: detector body overlap callbacks (triggers.cpp) - only looked at, for the "trigger fired" log
+#define PC_DET_ADD      0x008B82DDu  // __thiscall add(body, collidable), ret 4
+#define PC_DET_REMOVE   0x008B815Au  // __thiscall remove(body, ?, obj), ret 8
+typedef void(__fastcall *DetAdd_t)(void *body, void *edx, void *collidable);
+typedef void(__fastcall *DetRemove_t)(void *body, void *edx, void *a, void *obj);
+static DetAdd_t o_DetAdd;
+static DetRemove_t o_DetRemove;
+
+static void __fastcall hkDetAdd(void *body, void *edx, void *collidable)
+{
+    Trig_OnDetectorAdd(body, collidable);
+    o_DetAdd(body, edx, collidable);
+}
+
+static void __fastcall hkDetRemove(void *body, void *edx, void *a, void *obj)
+{
+    Trig_OnDetectorRemove(body, obj);
+    o_DetRemove(body, edx, a, obj);
+}
+
 static void *__fastcall hkGetCamMatrix(void *game, void *edx, float *out)
 {
     void *r = o_GetCamMatrix(game, edx, out);
@@ -313,6 +333,14 @@ static void InstallGameHooks()
     if (!HookGame(PC_HUD_PASS, kAlignedPro, sizeof(kAlignedPro), (void *)hkHud, (void **)&o_Hud,
                   "HUD pass (triggers depth)"))
         Log("WARNING: no HUD hook -> triggers depth mode draws at Present");
+    static const BYTE kDetAdd[] = {0x6A, 0x00, 0xB8, 0x4E, 0xE1, 0xFF, 0x00};
+    static const BYTE kDetRemove[] = {0x55, 0x8B, 0xEC, 0x51, 0x56, 0x57, 0xFF, 0x75, 0x0C};
+    CheckSlot(0x0126A020u, 0x14, PC_DET_ADD, "detector body");
+    CheckSlot(0x0126A020u, 0x18, PC_DET_REMOVE, "detector body");
+    if (!HookGame(PC_DET_ADD, kDetAdd, sizeof(kDetAdd), (void *)hkDetAdd, (void **)&o_DetAdd, "detector enter (log)") ||
+        !HookGame(PC_DET_REMOVE, kDetRemove, sizeof(kDetRemove), (void *)hkDetRemove, (void **)&o_DetRemove,
+                  "detector exit (log)"))
+        Log("WARNING: no detector hooks -> no \"trigger fired\" lines in the log");
 }
 
 bool Hooks_Install()

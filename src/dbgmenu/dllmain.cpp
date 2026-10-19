@@ -178,6 +178,6 @@ extern "C" void __cdecl DbgMenuTest(int cmd)
     if (!g_testMode || g_gameMatch) return;
     if (cmd == 5) Flight_TestThrow();
     else if (cmd == 6) Cursor_TestLog("check");
-    else if ((cmd >= 8 && cmd <= 11) || cmd == 13 || cmd == 14) Trig_TestControl(cmd);
+    else if ((cmd >= 8 && cmd <= 11) || cmd == 13 || cmd == 14 || cmd == 15) Trig_TestControl(cmd);
     else Game_TestControl(cmd);
 }

@@ -1050,12 +1050,124 @@ void Trig_DrawStatus()
     ImGui::End();
 }
 
+// ======================= task 09: "trigger fired" for the player (log only) =======================
+// Every detector (DetectorObject::onAdd 0x008B84FE, TriggerRegion too: its onAdd 0x008C8E47 jumps there) gets a
+// Havok phantom body +0xD4 (vt 0x0126A020; base 0x008D69C1, AABB phantom / shape phantom). The body keeps the
+// overlapping objects: +0x24 the detector, +0x28 objects {data, count +0x2C}, +0x34 per object collidable count.
+//   vt[0x14] 0x008B82DD add(collidable) (ret 4): obj = collidable+0x3C -> +0xC (0x00A112FF), WorldObject check
+//     0x00584325; a new object -> list, count 1, and if the detector is enabled (+0xD8) -> detector->vt[0x130](obj)
+//     ("onEnter" for DetectorObject 0x008B81E7, own handlers in TriggerRegion 0x008C77F9 and others); else count++.
+//   vt[0x18] 0x008B815A remove(?, obj) (ret 8): count-- ; at 0, if enabled -> detector->vt[0x134](obj) ("onExit").
+// Our hooks run before the original and only read: does this call make the player (vt 0x01266568) enter / leave?
+#define PC_VT_PLAYER_DET   0x01266568u
+#define OFS_BODY_DETECTOR  0x24
+#define OFS_BODY_OBJS      0x28
+#define OFS_BODY_NOBJS     0x2C
+#define OFS_BODY_COUNTS    0x34
+static volatile LONG s_detLogBudget;
+static LONG s_detEnter, s_detExit;
+
+static UINT_PTR PlayerVt()
+{
+    return TrigFake() ? (UINT_PTR)s_fakeVtActor : PC_VT_PLAYER_DET;
+}
+
+// index of the player in the body's object list, -1 = not there
+static int PlayerIndex(BYTE *body, void *player)
+{
+    int n = *(int *)(body + OFS_BODY_NOBJS);
+    void **objs = *(void ***)(body + OFS_BODY_OBJS);
+    if (n <= 0 || n > 4096 || !objs) return -1;
+    for (int i = 0; i < n; i++)
+        if (objs[i] == player) return i;
+    return -1;
+}
+
+static void DetectorLog(BYTE *body, const char *what)
+{
+    BYTE *d = *(BYTE **)(body + OFS_BODY_DETECTOR);
+    if (!d) return;
+    UINT_PTR vt = *(UINT_PTR *)d;
+    bool enabled = d[OFS_OBJ_ENABLED] != 0;
+    const char *cls = IsTriggerRegion(vt) ? "TriggerRegion" : "detector";
+    float *p = (float *)(d + OFS_OBJ_POS), *s = (float *)(d + OFS_OBJ_SCALE);
+    if (!LogBudget(&s_detLogBudget, 600)) return;
+    Log("trigger fired: %s %s vt=%08X det=%08X shape=%d at (%.0f %.0f %.0f) size (%.0f %.0f %.0f)%s | player %s",
+        what, cls, (unsigned)vt, (unsigned)(UINT_PTR)d, *(int *)(d + OFS_OBJ_SHAPE), p[0], p[1], p[2], s[0], s[1], s[2],
+        enabled ? "" : " - DISABLED, no event", !g_flying ? "walking" : (Flight_Attached() ? "carried (flight)" : "in flight"));
+}
+
+void Trig_OnDetectorAdd(void *body, void *collidable)
+{
+    __try {
+        BYTE *wrap = *(BYTE **)((BYTE *)collidable + 0x3C);  // 0x00A112FF
+        void *obj = wrap ? *(void **)(wrap + 0xC) : NULL;
+        if (!obj || *(UINT_PTR *)obj != PlayerVt()) return;
+        if (PlayerIndex((BYTE *)body, obj) >= 0) return;  // another collidable of the player: count++ only
+        s_detEnter++;
+        DetectorLog((BYTE *)body, "ENTER");
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+void Trig_OnDetectorRemove(void *body, void *obj)
+{
+    __try {
+        if (!obj || *(UINT_PTR *)obj != PlayerVt()) return;
+        int i = PlayerIndex((BYTE *)body, obj);
+        int *counts = *(int **)((BYTE *)body + OFS_BODY_COUNTS);
+        if (i < 0 || !counts || counts[i] != 1) return;  // still overlapping with another collidable
+        s_detExit++;
+        DetectorLog((BYTE *)body, "EXIT ");
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+}
+
+// test 15: a fake detector body; the player enters by two collidables, another object enters, the player leaves
+static void TestDetectorEvents()
+{
+    static BYTE det[0xE0], player[16], other[16], wrapP[16], wrapO[16], colP1[0x40], colP2[0x40], colO[0x40];
+    static BYTE body[0x40];
+    static void *objs[4];
+    static int counts[4];
+    *(void **)det = s_fakeVtTrig;
+    det[OFS_OBJ_ENABLED] = 1;
+    float pos[3] = {700, 200, 300}, sc[3] = {100, 50, 200};
+    memcpy(det + OFS_OBJ_POS, pos, sizeof(pos));
+    memcpy(det + OFS_OBJ_SCALE, sc, sizeof(sc));
+    *(void **)player = s_fakeVtActor;
+    *(void **)other = s_fakeVtDet;
+    *(void **)(wrapP + 0xC) = player;
+    *(void **)(wrapO + 0xC) = other;
+    *(void **)(colP1 + 0x3C) = wrapP;
+    *(void **)(colP2 + 0x3C) = wrapP;
+    *(void **)(colO + 0x3C) = wrapO;
+    *(void **)(body + OFS_BODY_DETECTOR) = det;
+    *(void ***)(body + OFS_BODY_OBJS) = objs;
+    *(int **)(body + OFS_BODY_COUNTS) = counts;
+    int &n = *(int *)(body + OFS_BODY_NOBJS);
+    n = 0;
+    LONG e0 = s_detEnter, x0 = s_detExit;
+    // what the game's add / remove do, after our hook looked
+    Trig_OnDetectorAdd(body, colP1); objs[n] = player; counts[n++] = 1;  // ENTER expected
+    Trig_OnDetectorAdd(body, colP2); counts[0]++;                       // second collidable: nothing
+    Trig_OnDetectorAdd(body, colO); objs[n] = other; counts[n++] = 1;   // not the player: nothing
+    Trig_OnDetectorRemove(body, player); counts[0]--;                   // one collidable left: nothing
+    Trig_OnDetectorRemove(body, other); n--;                            // not the player: nothing (list: player)
+    Trig_OnDetectorRemove(body, player);                                // EXIT expected
+    Log("test: detector events: enter %ld (expected 1), exit %ld (expected 1)", s_detEnter - e0, s_detExit - x0);
+}
+
 // ======================= offline test controls =======================
 // 8 = projection self-check, 9 = level unloaded (empty list), 10 = broken list (bad node + cycle), 11 = normal,
-// 13 = exception in the next collection, 14 = 8000 objects (timing)
+// 13 = exception in the next collection, 14 = 8000 objects (timing), 15 = task 09 detector enter/exit log
 void Trig_TestControl(int cmd)
 {
     if (!TrigFake()) return;
+    if (cmd == 15) {
+        TestDetectorEvents();
+        return;
+    }
     if (cmd == 8) {
         if (!s_view.ok) {
             Log("test: projection check: no view yet");

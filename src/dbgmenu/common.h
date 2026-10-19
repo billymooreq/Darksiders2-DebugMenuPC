@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.7 (task 08)"
+#define DBGMENU_VERSION "dbgmenu v0.8 (task 09)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -143,14 +143,25 @@ void Trig_D3DEvent(int type, IDirect3DDevice9 *dev, DWORD a, DWORD b, void *p); 
 void Trig_TestControl(int cmd);    // test mode: 8 projection check, 9 empty list, 10 broken list, 11 normal,
                                    // 13 exception in the next collection, 14 8000 objects (timing)
 
+// task 09: hooks of the detector body overlap callbacks (before the original): log "trigger fired" for the player
+void Trig_OnDetectorAdd(void *body, void *collidable);  // 0x008B82DD: a collidable starts overlapping
+void Trig_OnDetectorRemove(void *body, void *obj);      // 0x008B815A: an object stops overlapping
+
 // ---- flight.cpp: playerFly ----
 extern bool g_hoverAfterTeleport;  // menu playerFly -> hover after teleport (default on)
 enum { HJ_GAME = 0, HJ_DIRECT = 1 };
 extern int g_hoverJumpMode;        // menu playerFly -> hover jump: game (second chance kept armed) / direct (we jump)
+extern bool g_flyFreezeTime;       // task 09: menu playerFly -> freeze time in flight (default off: the world runs)
+extern bool g_flyAttach;           // task 09: menu playerFly -> attach player (default off)
+extern float g_attachDist;         // task 09: menu playerFly -> attach distance (units in front of the camera)
 extern volatile LONG g_flying;
 void Flight_Frame();                       // once per game frame, game thread
 void Flight_RequestToggle();               // F2 / menu
 void Flight_RequestTeleport();             // Enter / left mouse button while flying
+void Flight_RequestTime(int mode);         // task 09: T (-1 = switch) / menu (0 = run, 1 = freeze) while flying
+void Flight_RequestAttach(int mode);       // task 09: R (-1 = switch) / menu (0 = off, 1 = on) while flying
+bool Flight_TimeFrozen();                  // flying with our pause
+bool Flight_Attached();                    // the player is carried in front of the camera
 void Flight_RequestAbort(const char *why); // real failures only (not focus loss, not Reset)
 void Flight_OnUnload(bool processExit);
 void Flight_TestThrow();                   // test mode: exception in the next flight frame

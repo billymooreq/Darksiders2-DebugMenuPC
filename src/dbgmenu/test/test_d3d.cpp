@@ -131,7 +131,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1325; frame++) {
+    for (int frame = 1; frame <= 1520; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -217,7 +217,7 @@ int main()
         case 383: Key(VK_RETURN); break;
         case 390: Key(VK_F2); break;
         case 395: Key(VK_F2); break;
-        case 400: Say("menu: playerFly -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 400: Say("menu: playerFly -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;  // 09: 3 new items before it
         case 402: Snapshot("shot8.bmp"); break;
         case 404: Key(VK_F1); break;
         case 410: Say("hover off: teleport -> falls at once"); Key(VK_F2); break;
@@ -336,7 +336,7 @@ int main()
         case 1276: Snapshot("shot22.bmp"); break;
         case 1278: Say("08c: playerFly section (remembered item: hover jump)"); Key(VK_UP); Key(VK_RETURN); break;
         case 1280: Snapshot("shot23.bmp"); break;
-        case 1282: Say("08c: playerFly -> playerFly: Enter enters the flight"); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;
+        case 1282: Say("08c: playerFly -> playerFly: Enter enters the flight"); Key(VK_DOWN); Key(VK_RETURN); break;  // 09: hover jump is the last of 6
         case 1286: Snapshot("shot24.bmp"); break;
         case 1288: Say("08c: Enter again: flight off"); Key(VK_RETURN); break;
         case 1292: Say("08d: Camera section: showCameraPosition off, on"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RETURN); break;
@@ -353,6 +353,53 @@ int main()
         case 1316: Key(VK_F1); break;
         case 1318: Snapshot("shot29.bmp"); break;
         case 1320: Key(VK_F1); break;
+        // ---- task 09: time in flight (T, menu), the player carried in front of the camera (R, menu) ----
+        case 1325: Say("09a: F2: time runs by default (pause 0 -> 0), player free"); Key(VK_F2); break;
+        case 1330: Snapshot("shot30.bmp"); break;
+        case 1332: Say("09a: T -> time frozen (pause 0 -> 1); T reaches no game"); Key('T'); break;
+        case 1335: Snapshot("shot31.bmp"); break;
+        case 1337: Say("09a: T -> time runs (1 -> 0)"); Key('T'); break;
+        case 1340: Say("09b: R -> the player carried in front of the camera"); Key('R'); break;
+        case 1343: Snapshot("shot32.bmp"); break;
+        case 1345: Say("09b: W held: the camera flies, the player follows"); KeyDown('W'); break;
+        case 1365: KeyUp('W'); break;
+        case 1367: Say("09c: menu in flight: attach distance 200 -> 400 (the player catches up by 48 per frame)");
+            Key(VK_F1); Key(VK_UP); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN);
+            Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        case 1369: Snapshot("shot33.bmp"); break;
+        case 1371: Key(VK_F1); break;
+        case 1380: Say("09d: Alt+Tab while carried: frozen, held"); Focus(false); break;
+        case 1385: Focus(true); break;
+        case 1395: Say("09e: the game moves the player by itself -> let go, flight goes on"); Ctl(7); break;
+        case 1400: Snapshot("shot34.bmp"); break;
+        case 1403: Say("09f: R again, F2: the player stays where he was carried, hover, camera behind him"); Key('R'); break;
+        case 1406: Key(VK_F2); break;
+        case 1412: Snapshot("shot35.bmp"); break;
+        case 1415: Say("09f: Space releases the hover"); KeyDown(VK_SPACE); break;
+        case 1417: KeyUp(VK_SPACE); break;
+        case 1440: Say("09g: menu: attach distance back to 200, freeze time in flight on");
+            Key(VK_F1); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;
+        case 1442: Key(VK_F1); break;
+        case 1445: Say("09g: F2: the flight starts frozen (pause 0 -> 1)"); Key(VK_F2); break;
+        case 1448: Snapshot("shot36.bmp"); break;
+        case 1450: Say("09g: menu in flight: freeze time in flight off -> time runs at once"); Key(VK_F1); Key(VK_RETURN); break;
+        case 1452: Key(VK_F1); break;
+        case 1455: Say("09h: T frozen, R carried, Enter: the usual teleport, pause back to 0"); Key('T'); break;
+        case 1458: Key('R'); break;
+        case 1461: Key(VK_RETURN); break;
+        case 1470: KeyDown(VK_SPACE); break;
+        case 1472: KeyUp(VK_SPACE); break;
+        case 1480: Say("09i: F2, T, R, player lost -> emergency exit, pause 1 -> 0"); Key(VK_F2); break;
+        case 1483: Key('T'); break;
+        case 1485: Key('R'); break;
+        case 1488: Ctl(2); break;
+        case 1492: Ctl(1); break;
+        case 1495: Say("09j: F2, T, exception in the flight frame -> emergency exit, pause 1 -> 0"); Key(VK_F2); break;
+        case 1498: Key('T'); break;
+        case 1500: Ctl(5); break;
+        case 1505: Say("09k: detector enter/exit log (fake body)"); Ctl(15); break;
+        case 1510: Say("09l: T / R outside the flight reach the game"); Key('T'); Key('R'); break;
+        case 1515: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

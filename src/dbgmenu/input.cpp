@@ -10,6 +10,7 @@
 // Task 05: focus tracking (WM_ACTIVATEAPP / WM_ACTIVATE / WM_KILLFOCUS / WM_SETFOCUS + foreground check): losing
 // the window no longer ends the flight - it freezes it, every held key/button is forgotten and the cursor is
 // released at once; the hover after a teleport ends at the first game control key/button pressed (Input_HoverKey).
+// Task 09: T (time) and R (attach the player) while flying, from WM_KEYDOWN like Enter; the game never sees them.
 #include "common.h"
 
 volatile LONG g_menuOpen;
@@ -218,6 +219,10 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
             PushKey(vk);
         else if (g_flying && !g_menuOpen && m == WM_KEYDOWN && vk == VK_RETURN && !repeat)
             Flight_RequestTeleport();
+        else if (g_flying && !g_menuOpen && m == WM_KEYDOWN && !repeat && (vk == 'T' || vk == 'R')) {
+            if (vk == 'T') Flight_RequestTime(-1);  // task 09: time frozen / running
+            else Flight_RequestAttach(-1);          // task 09: carry the player / let him go
+        }
         // Alt+F4 must keep working
         return KeyMake(s_legacy, vk, blocked && !(m == WM_SYSKEYDOWN && vk == VK_F4));
     }

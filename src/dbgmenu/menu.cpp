@@ -25,6 +25,7 @@ struct Command {
     int *choice;                // CT_ENUM (Left/Right, Enter = next)
     const char *const *names;
     int numNames;
+    const char *fmt;            // CT_FLOAT value format (NULL = "%.2f")
 };
 
 static void Cmd_PlayerFly();
@@ -33,6 +34,8 @@ static void On_TrigDepth();
 static void On_ShowDisabled();
 static void On_ShowCameraPosition();
 static void On_Hover();
+static void On_FreezeTime();
+static void On_Attach();
 
 static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
 static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // order of TD_WALLS / TD_DEPTH
@@ -45,8 +48,17 @@ static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // ord
 static const Command g_commands[] = {
     // ---- playerFly ----
     {"playerFly", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
-     "Space/C up/down, Enter or left click: teleport the player here, F2: back without teleport.",
+     "Space/C up/down, Enter or left click: teleport the player here, R: carry the player, T: freeze / run time, "
+     "F2: back (a carried player stays where he is).",
      CT_ACTION, Cmd_PlayerFly, NULL, NULL, 0, 0, 0, "F2"},
+    {"playerFly", "freeze time in flight", "On: the game is paused while you fly (as before). Off: the world, enemies "
+     "and triggers keep running. T switches it during a flight.",
+     CT_TOGGLE, On_FreezeTime, &g_flyFreezeTime, NULL, 0, 0, 0, NULL},
+    {"playerFly", "attach player", "The flight starts with the player carried in front of the camera: he passes "
+     "through walls, does not fall and touches triggers. R switches it during a flight.",
+     CT_TOGGLE, On_Attach, &g_flyAttach, NULL, 0, 0, 0, NULL},
+    {"playerFly", "attach distance", "How far in front of the camera the carried player is.",
+     CT_FLOAT, NULL, NULL, &g_attachDist, 100.0f, 600.0f, 50.0f, NULL, NULL, NULL, 0, "%.0f"},
     {"playerFly", "hover after teleport", "After the teleport the player hangs in the air until you press a move, "
      "jump or attack key (the camera works). Off: he falls at once.",
      CT_TOGGLE, On_Hover, &g_hoverAfterTeleport, NULL, 0, 0, 0, NULL},
@@ -141,6 +153,17 @@ static void On_TrigDepth()
 static void On_ShowDisabled() { Menu_Status("show disabled %s", g_trigShowDisabled ? "on" : "off"); }
 static void On_ShowCameraPosition() { Menu_Status("Show Camera Position %s", g_showCameraPosition ? "on" : "off"); }
 static void On_Hover() { Menu_Status("hover after teleport %s", g_hoverAfterTeleport ? "on" : "off"); }
+// task 09: the start state of a flight; changed during a flight it also applies at once
+static void On_FreezeTime()
+{
+    Menu_Status("freeze time in flight %s", g_flyFreezeTime ? "on" : "off");
+    Flight_RequestTime(g_flyFreezeTime ? 1 : 0);
+}
+static void On_Attach()
+{
+    Menu_Status("attach player %s", g_flyAttach ? "on" : "off");
+    Flight_RequestAttach(g_flyAttach ? 1 : 0);
+}
 
 static void Execute(const Command *c)
 {
@@ -316,7 +339,9 @@ static void DrawMenu()
                 sprintf_s(value, "[%s]", *c->flag ? "on" : "off");
                 col = *c->flag ? kOn : kOff;
             } else if (c->type == CT_FLOAT) {
-                sprintf_s(value, "< %.2f >", *c->value);
+                char num[32];
+                sprintf_s(num, c->fmt ? c->fmt : "%.2f", *c->value);
+                sprintf_s(value, "< %s >", num);
                 col = kOn;
             } else if (c->type == CT_ENUM) {
                 sprintf_s(value, "< %s >", c->names[*c->choice]);
@@ -378,12 +403,18 @@ static void DrawFlyStatus()
         ImGui::SameLine();
         ImGui::Text("(paused, no focus)");
     } else {
+        bool frozen = Flight_TimeFrozen();
         ImGui::TextColored(kTitle, "FLY");
         ImGui::SameLine();
         ImGui::Text(" speed \xC3\x97%g  pos (%.0f %.0f %.0f) ", Flight_SpeedMul(), p.x, p.y, p.z);
         ImGui::SameLine();
+        ImGui::TextColored(frozen ? kStatus : kOn, "time: %s", frozen ? "frozen" : "running");
+        ImGui::SameLine();
+        if (Flight_Attached()) ImGui::TextColored(kOn, " attached: dist %.0f ", g_attachDist);
+        else ImGui::Text(" free ");
+        ImGui::SameLine();
         ImGui::TextDisabled(g_menuOpen ? "[menu open: flight stopped, F1 closes the menu]"
-                                       : "[Enter/LMB - teleport, F2 - exit]");
+                                       : "[R attach \xC2\xB7 T time \xC2\xB7 Enter/LMB teleport \xC2\xB7 F2 exit]");
     }
     ImGui::End();
 }
