@@ -17,7 +17,7 @@
 - **through walls** (по умолчанию): ImGui `GetBackgroundDrawList()` в оверлее (Present).
 - **depth**: в начале HUD-прохода 0x00B3B8D2 — в текущую цель рендера с текущим depth (проверка: есть, размер ≥ цели, тот же MSAA), D3D9 `LINELIST` XYZRHW (z считаем сами из proj, сдвиг к камере `max(2, 0.3%·d)` против мерцания на полу/стенах, `ZFUNC LESSEQUAL`, без записи z, 2 px = вторая линия со сдвигом 1 px); state block D3DSBT_ALL. Не было HUD-прохода — то же в Present (back buffer). Нет годного depth → в этом кадре ImGui (статус «depth: n/a»). Своих D3D-ресурсов нет (DrawPrimitiveUP) → Reset ничего не требует.
 - **Timeline**: при включении depth — один кадр всех `SetRenderTarget` / `SetDepthStencilSurface` / `Clear` (с адресом вызова и описанием поверхности) + отметки «render view», «HUD pass», «Present» → лог. Для поиска лучшей точки, если depth не закрывает линии.
-- Меню **Graphics**: `Show triggers [on/off] (shortcut F3)`, `triggers depth < through walls / depth >`, `show disabled [on]`. Строка внизу слева (над строкой полёта): `triggers: N drawn / M total [режим]`.
+- Меню **Triggers** (до v0.7 — Graphics, пункт `triggers depth`): `Show triggers [on/off] (shortcut F3)`, `depth < through walls / depth >`, `show disabled [on]`. Строка внизу слева (над строкой полёта): `triggers: N drawn / M total [режим]`.
 - **Лог**: при включении — миры, EventManager, count/длина списка, найдено по классам (vtable) и shape, выключенных, ошибки; первый кадр — параметры вида (fov/aspect/near/far из proj, камера); точка depth (цель, depth, viewport) при каждом изменении; раз в 5 с (≤ 300 строк) — число, нарисовано, время сбора/отрисовки (среднее/макс), плохие вершины, другие вызовы 0x00983AFC; один раз — сверка нашего поворота с 0x00A79856 (`rotated shape check … same/DIFFERENT`).
 
 ## 3. Офлайн-тест (`test_d3d.cpp`, кадры 1150–1270; подделка — в `triggers.cpp`: свой EventManager, 10 объектов перед камерой (100,200,300)→+X)
@@ -30,3 +30,6 @@
 - **depth**: что за цель и depth в точке HUD (`depth point HUD pass …`), закрывают ли стены линии. Если нет — timeline кадра покажет, где сцена пишет depth и когда его меняют/чистят; варианты: рисовать после последнего `SetRenderTarget` сцены, или до пост-обработки.
 - Производительность в больших локациях (лог раз в 5 с).
 - Капсулы: рисовать ли настоящую капсулу (без поворота, высота Scale.z + Scale.x) вместо Xbox-бокса.
+
+## 5. Итог проверки v0.6 в игре (2026-10-19, задача 08) — ЗАКРЫТО
+Пользователь: триггеры «работают просто шикарно», переделывать ничего не нужно. Режим **depth работает** (стены закрывают линии) — точку отрисовки (HUD-проход 0x00B3B8D2) **не менять**. Капсулы — **оставить боксом**, как на Xbox. Вопросы §4 сняты. С v0.7 пункты — в разделе меню **Triggers** (`menu_pc.md`).

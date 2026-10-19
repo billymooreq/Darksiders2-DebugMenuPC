@@ -131,7 +131,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1270; frame++) {
+    for (int frame = 1; frame <= 1325; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -140,12 +140,12 @@ int main()
         switch (frame) {
         case 3: Key('W'); break;                            // menu closed: must reach the game
         case 5: Key(VK_F1); break;                          // open
-        case 8: Key(VK_DOWN); break;                        // -> Camera
+        case 8: Key(VK_DOWN); Key(VK_DOWN); break;          // playerFly -> Triggers -> Camera
         case 11: Key(VK_RETURN); break;                     // enter category
         case 14: Key(VK_RETURN); break;                     // showCameraPosition on
         case 16: Key('W'); break;                           // menu open: must NOT reach the game
         case 25: Snapshot("shot1.bmp"); break;
-        case 27: Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_LEFT); Key(VK_LEFT); break;  // Menu > opacity -0.10
+        case 27: Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_RETURN); Key(VK_LEFT); Key(VK_LEFT); break;  // Menu > opacity -0.10
         case 30:
             g_pp.BackBufferWidth = 1024;
             g_pp.BackBufferHeight = 768;
@@ -217,7 +217,7 @@ int main()
         case 383: Key(VK_RETURN); break;
         case 390: Key(VK_F2); break;
         case 395: Key(VK_F2); break;
-        case 400: Say("menu: General -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 400: Say("menu: playerFly -> hover after teleport -> off"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
         case 402: Snapshot("shot8.bmp"); break;
         case 404: Key(VK_F1); break;
         case 410: Say("hover off: teleport -> falls at once"); Key(VK_F2); break;
@@ -301,7 +301,7 @@ int main()
         case 1175: KeyUp('A'); Ctl(8); break;
         case 1177: Snapshot("shot12.bmp"); break;
         case 1180: Key(VK_F2); break;
-        case 1183: Say("07c: menu Graphics -> triggers depth: depth"); Ctl(12); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); break;
+        case 1183: Say("07c: menu Triggers -> depth: depth"); Ctl(12); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); break;
         case 1185: Key(VK_RETURN); Key(VK_DOWN); Key(VK_RIGHT); break;
         case 1187: Snapshot("shot13.bmp"); break;
         case 1188: Key(VK_F1); break;
@@ -329,6 +329,30 @@ int main()
         case 1259: Key(VK_F1); break;
         case 1262: Say("07i: F3 -> off"); Key(VK_F3); break;
         case 1266: Snapshot("shot20.bmp"); break;
+        // ---- task 08: menu grouped by feature (playerFly / Triggers / Camera / Menu), cursor remembered ----
+        case 1270: Say("08a: F1 opens where it was closed: Triggers > depth"); Key(VK_F1); break;
+        case 1272: Snapshot("shot21.bmp"); break;
+        case 1274: Say("08b: Esc -> the four sections"); Key(VK_ESCAPE); break;
+        case 1276: Snapshot("shot22.bmp"); break;
+        case 1278: Say("08c: playerFly section (remembered item: hover jump)"); Key(VK_UP); Key(VK_RETURN); break;
+        case 1280: Snapshot("shot23.bmp"); break;
+        case 1282: Say("08c: playerFly -> playerFly: Enter enters the flight"); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;
+        case 1286: Snapshot("shot24.bmp"); break;
+        case 1288: Say("08c: Enter again: flight off"); Key(VK_RETURN); break;
+        case 1292: Say("08d: Camera section: showCameraPosition off, on"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RETURN); break;
+        case 1294: Snapshot("shot25.bmp"); break;
+        case 1296: Key(VK_RETURN); break;
+        case 1298: Say("08e: Menu section: opacity +0.05, text scale +0.25"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); Key(VK_DOWN); Key(VK_RIGHT); break;
+        case 1300: Snapshot("shot26.bmp"); break;
+        case 1302: Say("08e: back to opacity 0.70, text 1.00"); Key(VK_LEFT); Key(VK_UP); Key(VK_LEFT); break;
+        case 1304: Say("08f: Triggers section: Show triggers by Enter"); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
+        case 1308: Ctl(8); Snapshot("shot27.bmp"); break;
+        case 1310: Say("08f: F3 with the menu open: off"); Key(VK_F3); break;
+        case 1312: Snapshot("shot28.bmp"); break;
+        case 1314: Say("08g: Esc Esc closes; F1 opens at the section list on Triggers"); Key(VK_ESCAPE); Key(VK_ESCAPE); break;
+        case 1316: Key(VK_F1); break;
+        case 1318: Snapshot("shot29.bmp"); break;
+        case 1320: Key(VK_F1); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

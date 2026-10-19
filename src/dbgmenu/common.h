@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.6 (task 07)"
+#define DBGMENU_VERSION "dbgmenu v0.7 (task 08)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -128,9 +128,9 @@ void Game_TestControl(int cmd);
 // ---- triggers.cpp: Show triggers (task 07, notes/triggers_pc.md) ----
 enum { TD_WALLS = 0, TD_DEPTH = 1 };
 enum { TE_SETRT = 1, TE_SETDS, TE_CLEAR, TE_VIEW, TE_HUD, TE_PRESENT };
-extern bool g_showTriggers;        // Graphics -> Show triggers (F3)
-extern int g_trigDepthMode;        // Graphics -> triggers depth: through walls / depth
-extern bool g_trigShowDisabled;    // Graphics -> show disabled (default on)
+extern bool g_showTriggers;        // menu Triggers -> Show triggers (F3)
+extern int g_trigDepthMode;        // menu Triggers -> depth: through walls / depth
+extern bool g_trigShowDisabled;    // menu Triggers -> show disabled (default on)
 void Trig_Frame();                 // game thread, once per game frame (before the original frame): collect
 void Trig_Toggle();                // F3 / menu
 void Trig_OnRenderView(const float *camMat, const float *proj, void *caller);  // hook 0x00983AFC
@@ -144,9 +144,9 @@ void Trig_TestControl(int cmd);    // test mode: 8 projection check, 9 empty lis
                                    // 13 exception in the next collection, 14 8000 objects (timing)
 
 // ---- flight.cpp: playerFly ----
-extern bool g_hoverAfterTeleport;  // menu General -> hover after teleport (default on)
+extern bool g_hoverAfterTeleport;  // menu playerFly -> hover after teleport (default on)
 enum { HJ_GAME = 0, HJ_DIRECT = 1 };
-extern int g_hoverJumpMode;        // menu General -> hover jump: game (second chance kept armed) / direct (we jump)
+extern int g_hoverJumpMode;        // menu playerFly -> hover jump: game (second chance kept armed) / direct (we jump)
 extern volatile LONG g_flying;
 void Flight_Frame();                       // once per game frame, game thread
 void Flight_RequestToggle();               // F2 / menu

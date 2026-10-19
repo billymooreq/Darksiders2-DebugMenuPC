@@ -37,28 +37,36 @@ static void On_Hover();
 static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
 static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // order of TD_WALLS / TD_DEPTH
 
-// Command registry (like the Xbox console registry): one line = one menu item; categories in order of appearance.
+// Command registry (like the Xbox console registry): one line = one menu item.
+// Task 08: one category = one feature, all its settings inside it. Categories are shown in order of their first
+// appearance here, items in their order inside the category.
+//   new item    -> one line with the category of its feature (keep it next to the other lines of that category);
+//   new section -> lines with a new category name, placed where the section should appear (max 16 sections).
 static const Command g_commands[] = {
-    {"General", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
+    // ---- playerFly ----
+    {"playerFly", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
      "Space/C up/down, Enter or left click: teleport the player here, F2: back without teleport.",
      CT_ACTION, Cmd_PlayerFly, NULL, NULL, 0, 0, 0, "F2"},
-    {"General", "hover after teleport", "After the teleport the player hangs in the air until you press a move, "
+    {"playerFly", "hover after teleport", "After the teleport the player hangs in the air until you press a move, "
      "jump or attack key (the camera works). Off: he falls at once.",
      CT_TOGGLE, On_Hover, &g_hoverAfterTeleport, NULL, 0, 0, 0, NULL},
-    {"General", "hover jump", "Space while hanging: a normal jump, then the double jump. game: the game jumps by "
+    {"playerFly", "hover jump", "Space while hanging: a normal jump, then the double jump. game: the game jumps by "
      "itself (its jump from a fall is kept ready); direct: the menu starts the jump. Also after W/attack: one jump "
      "in the air while falling.",
      CT_ENUM, NULL, NULL, NULL, 0, 0, 0, NULL, &g_hoverJumpMode, kHoverJumpNames, 2},
-    {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
-     CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, NULL},
-    {"Graphics", "Show triggers", "Draw the live trigger volumes (detectors of the loaded level): magenta = "
+    // ---- Triggers ----
+    {"Triggers", "Show triggers", "Draw the live trigger volumes (detectors of the loaded level): magenta = "
      "TriggerRegion, cyan = other detectors, gray = switched off.",
      CT_TOGGLE, On_ShowTriggers, &g_showTriggers, NULL, 0, 0, 0, "F3"},
-    {"Graphics", "triggers depth", "through walls: the lines are on top of everything. depth: walls hide the lines "
+    {"Triggers", "depth", "through walls: the lines are on top of everything. depth: walls hide the lines "
      "(drawn into the 3D scene before the HUD).",
      CT_ENUM, On_TrigDepth, NULL, NULL, 0, 0, 0, NULL, &g_trigDepthMode, kTrigDepthNames, 2},
-    {"Graphics", "show disabled", "Also draw the switched-off triggers (gray, paler).",
+    {"Triggers", "show disabled", "Also draw the switched-off triggers (gray, paler).",
      CT_TOGGLE, On_ShowDisabled, &g_trigShowDisabled, NULL, 0, 0, 0, NULL},
+    // ---- Camera ----
+    {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
+     CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, NULL},
+    // ---- Menu ----
     {"Menu", "Panel opacity", "Background opacity of the menu panel.",
      CT_FLOAT, NULL, NULL, &s_panelAlpha, 0.30f, 1.00f, 0.05f, NULL},
     {"Menu", "Text scale", "Size of the menu text.",
@@ -68,6 +76,7 @@ static const int kNumCommands = sizeof(g_commands) / sizeof(g_commands[0]);
 
 static const char *s_cats[16];
 static int s_numCats;
+// Cursor: never reset when the menu closes, so F1 opens it where it was closed (for the whole game run).
 static int s_level;         // 0 = categories, 1 = items of s_cat
 static int s_cat;
 static int s_itemSel[16];   // remembered selection per category
@@ -90,6 +99,19 @@ static int ItemsOf(int cat, const Command **out, int max)
     for (int i = 0; i < kNumCommands && n < max; i++)
         if (strcmp(g_commands[i].category, s_cats[cat]) == 0) out[n++] = &g_commands[i];
     return n;
+}
+
+// "Triggers" (section list) or "Triggers > depth" (items) - for the log
+static const char *Where()
+{
+    static char buf[96];
+    if (!s_numCats) return "-";
+    if (s_level == 0) return s_cats[s_cat];
+    const Command *items[64];
+    int n = ItemsOf(s_cat, items, 64);
+    int sel = s_itemSel[s_cat] < n ? s_itemSel[s_cat] : n - 1;
+    sprintf_s(buf, "%s > %s", s_cats[s_cat], sel >= 0 ? items[sel]->name : "-");
+    return buf;
 }
 
 void Menu_Status(const char *fmt, ...)
@@ -134,7 +156,7 @@ static void Execute(const Command *c)
         break;
     case CT_ENUM:
         *c->choice = (*c->choice + 1) % c->numNames;
-        Menu_Status("%s: %s", c->name, c->names[*c->choice]);
+        Menu_Status("%s > %s: %s", c->category, c->name, c->names[*c->choice]);
         if (c->action) c->action();
         break;
     }
@@ -144,7 +166,7 @@ static void Change(const Command *c, int dir)
 {
     if (c->type == CT_ENUM) {
         *c->choice = (*c->choice + c->numNames + dir) % c->numNames;
-        Menu_Status("%s: %s", c->name, c->names[*c->choice]);
+        Menu_Status("%s > %s: %s", c->category, c->name, c->names[*c->choice]);
         if (c->action) c->action();
     } else if (c->type == CT_TOGGLE) {
         bool v = dir > 0;
@@ -155,6 +177,7 @@ static void Change(const Command *c, int dir)
     } else if (c->type == CT_FLOAT) {
         float v = *c->value + dir * c->step;
         *c->value = v < c->vmin ? c->vmin : (v > c->vmax ? c->vmax : v);
+        Log("menu: %s > %s = %.2f", c->category, c->name, *c->value);
     }
 }
 
@@ -163,7 +186,8 @@ void Menu_HandleKey(int vk)
 {
     InitCategories();
     if (vk == VK_F1) {
-        Log("menu: %s", g_menuOpen ? "opened" : "closed");
+        if (g_menuOpen) Log("menu: opened at %s", Where());
+        else Log("menu: closed at %s", Where());
         return;
     }
     if (vk == VK_F2) {  // the WndProc already requested the flight toggle
@@ -181,11 +205,14 @@ void Menu_HandleKey(int vk)
         case VK_UP: s_cat = (s_cat + s_numCats - 1) % s_numCats; break;
         case VK_DOWN: s_cat = (s_cat + 1) % s_numCats; break;
         case VK_RETURN:
-        case VK_RIGHT: s_level = 1; break;
+        case VK_RIGHT:
+            s_level = 1;
+            Log("menu: open %s", Where());
+            break;
         case VK_ESCAPE:
         case VK_BACK:
             Input_SetMenuOpen(false);
-            Log("menu: closed");
+            Log("menu: closed at %s", Where());
             break;
         }
         return;
@@ -215,7 +242,10 @@ void Menu_HandleKey(int vk)
         if (c->type != CT_ACTION) Change(c, +1);
         break;
     case VK_ESCAPE:
-    case VK_BACK: s_level = 0; break;
+    case VK_BACK:
+        s_level = 0;
+        Log("menu: back to %s", Where());
+        break;
     }
 }
 
