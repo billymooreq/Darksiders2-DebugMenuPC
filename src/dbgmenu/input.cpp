@@ -179,6 +179,9 @@ static void RunHotkey(int act)
     case KA_TRIGGERS:
         if (g_overlayReady) Trig_Toggle();  // task 07: Show triggers
         break;
+    case KA_TARGET:
+        if (g_overlayReady) Mon_ToggleTarget();  // task 11: Monsters > info: target
+        break;
     }
     PushKey(KQ_ACTION | act);
 }

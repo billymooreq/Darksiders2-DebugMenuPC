@@ -147,6 +147,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         }
     } else if (reason == DLL_PROCESS_DETACH) {
         Flight_OnUnload(reserved != NULL);
+        if (!reserved) Mon_OnUnload();  // FreeLibrary only: at process exit the game is gone anyway
         Cursor_OnUnload();
         Log("==== unload (process exit=%d) ====", reserved != NULL);
     }
@@ -174,7 +175,7 @@ extern "C" LPCVOID WINAPI Proxy_GetdfDIJoystick(void) { return p_GetdfDIJoystick
 
 // Offline test harness only (does nothing in the game): 1..4, 7 fake game state, 5 = exception in the flight frame,
 // 6 = log the simulated cursor state, 8..11, 13 triggers (projection check, empty / broken / normal fake list, exception),
-// 16 = read dbgmenu_keys.ini again (task 10).
+// 16 = read dbgmenu_keys.ini again (task 10), 17..26 monsters (task 11, monsters.cpp Mon_TestControl).
 extern "C" void __cdecl DbgMenuTest(int cmd)
 {
     if (!g_testMode || g_gameMatch) return;
@@ -182,5 +183,6 @@ extern "C" void __cdecl DbgMenuTest(int cmd)
     else if (cmd == 5) Flight_TestThrow();
     else if (cmd == 6) Cursor_TestLog("check");
     else if ((cmd >= 8 && cmd <= 11) || cmd == 13 || cmd == 14 || cmd == 15) Trig_TestControl(cmd);
+    else if (cmd >= 17 && cmd <= 26) Mon_TestControl(cmd);
     else Game_TestControl(cmd);
 }

@@ -78,6 +78,7 @@ static HRESULT STDMETHODCALLTYPE hkPresent(IDirect3DDevice9 *dev, const RECT *sr
         if (!g_frameHooked) {  // fallback (offline test / frame hook refused)
             Trig_Frame();
             Flight_Frame();
+            Mon_Frame();
         }
         Trig_OnPresent(dev);  // depth mode, if the HUD pass did not draw this frame
         Overlay_OnFrame(dev);
@@ -95,6 +96,7 @@ static HRESULT STDMETHODCALLTYPE hkSCPresent(IDirect3DSwapChain9 *sc, const RECT
         if (!g_frameHooked) {
             Trig_Frame();
             Flight_Frame();
+            Mon_Frame();
         }
         if (SUCCEEDED(sc->GetDevice(&dev)) && dev) {
             Trig_OnPresent(dev);
@@ -246,6 +248,7 @@ static void __fastcall hkFrame(void *game)
 {
     Trig_Frame();    // task 07: trigger snapshot (before the frame, like the flight)
     Flight_Frame();  // between frames: requests, pause, teleport, camera matrix for this frame
+    Mon_Frame();     // task 11: freeze monsters / damage info flags follow the menu
     o_Frame(game);
 }
 
@@ -288,6 +291,30 @@ static void __fastcall hkDetRemove(void *body, void *edx, void *a, void *obj)
 {
     Trig_OnDetectorRemove(body, obj);
     o_DetRemove(body, edx, a, obj);
+}
+
+// task 11: the options commit (copy into the profile block +0x4C) and "changed" (compare with it) - while the menu
+// forces DamageIndicators (+0x2F) on, both see the player's own value, so the profile never keeps ours
+#define PC_OPT_COMMIT   0x004DA98Bu  // void __fastcall commit(options), options vt[0x3C]
+#define PC_OPT_CHANGED  0x004DA84Du  // bool __fastcall changed(options), options vt[0x40]
+typedef void(__fastcall *OptCommit_t)(void *opt);
+typedef bool(__fastcall *OptChanged_t)(void *opt);
+static OptCommit_t o_OptCommit;
+static OptChanged_t o_OptChanged;
+
+static void __fastcall hkOptCommit(void *opt)
+{
+    int prev = Mon_OptionsHide(opt);
+    o_OptCommit(opt);
+    if (prev >= 0) Mon_OptionsRestore(opt, prev);
+}
+
+static bool __fastcall hkOptChanged(void *opt)
+{
+    int prev = Mon_OptionsHide(opt);
+    bool r = o_OptChanged(opt);
+    if (prev >= 0) Mon_OptionsRestore(opt, prev);
+    return r;
 }
 
 static void *__fastcall hkGetCamMatrix(void *game, void *edx, float *out)
@@ -341,6 +368,13 @@ static void InstallGameHooks()
         !HookGame(PC_DET_REMOVE, kDetRemove, sizeof(kDetRemove), (void *)hkDetRemove, (void **)&o_DetRemove,
                   "detector exit (log)"))
         Log("WARNING: no detector hooks -> no \"trigger fired\" lines in the log");
+    static const BYTE kOptCommit[] = {0x8B, 0x41, 0x4C, 0x8B, 0x51, 0x08, 0x89, 0x10};
+    static const BYTE kOptChanged[] = {0x8B, 0x41, 0x4C, 0x8B, 0x10, 0x53, 0x56, 0x3B, 0x51, 0x08};
+    if (!HookGame(PC_OPT_COMMIT, kOptCommit, sizeof(kOptCommit), (void *)hkOptCommit, (void **)&o_OptCommit,
+                  "options commit (damage info)") ||
+        !HookGame(PC_OPT_CHANGED, kOptChanged, sizeof(kOptChanged), (void *)hkOptChanged, (void **)&o_OptChanged,
+                  "options changed (damage info)"))
+        g_monDamageNoHooks = true;
 }
 
 bool Hooks_Install()

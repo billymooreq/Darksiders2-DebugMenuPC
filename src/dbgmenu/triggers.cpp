@@ -585,6 +585,32 @@ void Trig_OnRenderView(const float *camMat, const float *proj, void *caller)
 
 static bool ViewFresh() { return s_view.ok && s_view.frame == s_frame; }
 
+// task 11: the same view for the monster labels (monsters.cpp)
+bool Trig_View(float *vp, float *cam, float *proj)
+{
+    if (!ViewFresh()) return false;
+    memcpy(vp, s_view.vp, sizeof(s_view.vp));
+    memcpy(cam, s_view.cam, sizeof(s_view.cam));
+    memcpy(proj, s_view.proj, sizeof(s_view.proj));
+    return true;
+}
+
+// task 11: the EventManagers of the loaded world (their actor list +0x8 has the characters); real game only
+int Trig_EventManagers(void **out, int max)
+{
+    if (TrigFake() || max <= 0) return 0;
+    void *worlds[4];
+    int nw = Worlds(worlds), n = 0;
+    for (int i = 0; i < nw && n < max; i++) {
+        void *evm = GetEvm(worlds[i]);
+        if (!evm) continue;
+        bool dup = false;
+        for (int j = 0; j < n; j++) dup |= out[j] == evm;
+        if (!dup) out[n++] = evm;
+    }
+    return n;
+}
+
 static void LogView(const char *where, UINT w, UINT h)
 {
     const float *p = s_view.proj, *m = s_view.cam;

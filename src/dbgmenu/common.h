@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.9 (task 10)"
+#define DBGMENU_VERSION "dbgmenu v0.10 (task 11)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -70,7 +70,8 @@ void Menu_Status(const char *fmt, ...);
 void Menu_OnDebugSwitch(bool on);  // task 10: F10 on / off (status cleared, key capture cancelled)
 
 // ---- keys.cpp: task 10, the master switch (F10) and the hotkeys the player can change (dbgmenu_keys.ini) ----
-enum KeyAction { KA_NONE = 0, KA_DEBUG, KA_MENU, KA_FLY, KA_TRIGGERS, KA_ATTACH, KA_TIME, KA_COUNT };
+enum KeyAction { KA_NONE = 0, KA_DEBUG, KA_MENU, KA_FLY, KA_TRIGGERS, KA_ATTACH, KA_TIME, KA_TARGET,  // 11: info: target
+                 KA_COUNT };
 enum { KQ_CAPTURE = 0x1000, KQ_ACTION = 0x2000 };  // key queue: a key for the menu Keys / a hotkey that was run
 extern volatile LONG g_debugOn;     // the debug menu is on (off after the game starts)
 extern volatile LONG g_keyCapture;  // menu Keys waits for a new key (the action), 0 = no
@@ -80,7 +81,7 @@ const char *Keys_KeyName(int action);  // "F1"
 const char *Keys_Label(int action);    // "menu", "attach (in flight)"
 const char *Keys_Name(int vk);      // any key, also the forbidden ones ("Space")
 bool Keys_Allowed(int vk);
-int Keys_HotkeyNow(int vk);         // KA_DEBUG always; KA_MENU / KA_FLY / KA_TRIGGERS while the debug menu is on
+int Keys_HotkeyNow(int vk);         // KA_DEBUG always; KA_MENU / KA_FLY / KA_TRIGGERS / KA_TARGET while it is on
 bool Keys_Assign(int action, int vk, int *swapped);  // false = not allowed; writes the file
 void Keys_ResetDefaults();          // writes the file
 const char *Keys_FilePath();
@@ -161,9 +162,33 @@ void Trig_D3DEvent(int type, IDirect3DDevice9 *dev, DWORD a, DWORD b, void *p); 
 void Trig_TestControl(int cmd);    // test mode: 8 projection check, 9 empty list, 10 broken list, 11 normal,
                                    // 13 exception in the next collection, 14 8000 objects (timing)
 
+// task 11: for monsters.cpp - the view of this frame (false = no 3D view this frame) and the EventManagers of the
+// loaded world (real game only)
+bool Trig_View(float *vp, float *cam, float *proj);
+int Trig_EventManagers(void **out, int max);
+
 // task 09: hooks of the detector body overlap callbacks (before the original): log "trigger fired" for the player
 void Trig_OnDetectorAdd(void *body, void *collidable);  // 0x008B82DD: a collidable starts overlapping
 void Trig_OnDetectorRemove(void *body, void *obj);      // 0x008B815A: an object stops overlapping
+
+// ---- monsters.cpp: section Monsters (task 11, notes/monsters_pc.md) ----
+enum { MW_MONSTERS = 0, MW_NPC = 1, MW_ALL = 2 };
+extern bool g_monNearby;           // menu Monsters -> info: nearby (labels over the monsters around)
+extern bool g_monTarget;           // menu Monsters -> info: target (panel of the monster in the centre; key F5)
+extern bool g_monDamage;           // menu Monsters -> damage info (the game's DamageIndicators while on)
+extern bool g_monFreeze;           // menu Monsters -> freeze monsters (toggleMonsterUpdate, byte 0x014D4278)
+extern int g_monLevel;             // menu Monsters -> info level: 0..3 = Xbox showCharacterInfo levels 1..4
+extern int g_monRange;             // menu Monsters -> nearby range (index: 10 20 30 50 75 100 150 m, unlimited)
+extern int g_monWho;               // menu Monsters -> show: MW_*
+void Mon_Frame();                  // game thread, once per game frame (before the frame): freeze / damage flags
+void Mon_Draw2D();                 // overlay frame (ImGui, game thread): collect, labels, target panel, summary
+void Mon_ToggleTarget();           // the info: target key
+void Mon_OnDebugOff();             // F10 off: everything off, flags back
+void Mon_OnUnload();
+extern bool g_monDamageNoHooks;    // the options hooks are not installed -> damage info is not offered
+int Mon_OptionsHide(void *opt);    // hooks of the options commit / changed: the game sees the player's value
+void Mon_OptionsRestore(void *opt, int prev);  // (any options object, also a copy; -1 = nothing was hidden)
+void Mon_TestControl(int cmd);     // test mode: 17..26
 
 // ---- flight.cpp: playerFly ----
 extern bool g_hoverAfterTeleport;  // menu playerFly -> hover after teleport (default on)

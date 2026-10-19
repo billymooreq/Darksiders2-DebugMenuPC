@@ -13,11 +13,13 @@
 
 volatile LONG g_debugOn;
 
-static const int kDefaults[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T'};
-static int s_keys[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T'};
-static const char *const kIniNames[KA_COUNT] = {"", "debug", "menu", "playerFly", "showTriggers", "attach", "time"};
+// task 11: + info: target (Monsters), default F5
+static const int kDefaults[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T', VK_F5};
+static int s_keys[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T', VK_F5};
+static const char *const kIniNames[KA_COUNT] = {"", "debug", "menu", "playerFly", "showTriggers", "attach", "time",
+                                                "infoTarget"};
 static const char *const kLabels[KA_COUNT] = {"", "debug on/off", "menu", "playerFly", "Show triggers",
-                                              "attach (in flight)", "time (in flight)"};
+                                              "attach (in flight)", "time (in flight)", "info: target"};
 static char s_path[MAX_PATH];
 
 // keys that can be assigned (name = the name in the file)
@@ -103,6 +105,7 @@ int Keys_HotkeyNow(int vk)
     if (vk == s_keys[KA_MENU]) return KA_MENU;
     if (vk == s_keys[KA_FLY]) return KA_FLY;
     if (vk == s_keys[KA_TRIGGERS]) return KA_TRIGGERS;
+    if (vk == s_keys[KA_TARGET]) return KA_TARGET;
     return KA_NONE;
 }
 
@@ -136,6 +139,7 @@ static bool Save(const char *why)
           "; showTriggers - draw the trigger volumes (default F3)\n"
           "; attach       - in a flight: carry the player in front of the camera (default R)\n"
           "; time         - in a flight: freeze / run the time (default T)\n"
+          "; infoTarget   - Monsters: the info panel of the monster in the centre of the screen (default F5)\n"
           ";\n"
           "; Key names: F1-F24 (not F4), A-Z (not W A S D C), 0-9, Numpad0-Numpad9, NumpadMultiply, NumpadAdd,\n"
           ";   NumpadSubtract, NumpadDecimal, NumpadDivide, Insert, Delete, Home, End, PageUp, PageDown,\n"
@@ -178,7 +182,7 @@ void Keys_Load()
         LogKeys("in use");
         return;
     }
-    int want[KA_COUNT] = {0}, lineOf[KA_COUNT] = {0}, problems = 0, n = 0;
+    int want[KA_COUNT] = {0}, lineOf[KA_COUNT] = {0}, problems = 0, missing = 0, n = 0;
     char line[256];
     while (fgets(line, sizeof(line), f)) {
         n++;
@@ -242,6 +246,7 @@ void Keys_Load()
         if (!lineOf[a]) {
             Log("keys: no line for %s -> default", kIniNames[a]);
             problems++;
+            if (a >= KA_TARGET) missing++;  // an action newer than v0.9 (a file of an older version)
         }
         for (int d = 0; d < KA_COUNT && !keys[a]; d++) {
             int cand = d == 0 ? kDefaults[a] : kDefaults[d];
@@ -257,8 +262,16 @@ void Keys_Load()
         }
     }
     for (int a = 1; a < KA_COUNT; a++) s_keys[a] = keys[a];
-    Log("keys: %s read (%d lines, %d problem%s; the file is not rewritten until a key is changed in the menu)",
-        s_path, n, problems, problems == 1 ? "" : "s");
+    if (problems && problems == missing) {
+        // task 11: only the lines of actions added after v0.9 are missing (the file of an older version) -> the
+        // file gets them with the default keys, the player's own lines stay as they are
+        Log("keys: %s read (%d lines): %d action%s of a newer version added (keys above)", s_path, n, missing,
+            missing == 1 ? "" : "s");
+        Save("new actions added");
+    } else {
+        Log("keys: %s read (%d lines, %d problem%s; the file is not rewritten until a key is changed in the menu)",
+            s_path, n, problems, problems == 1 ? "" : "s");
+    }
     LogKeys("in use");
 }
 
@@ -300,19 +313,23 @@ void Debug_Toggle(const char *why)
     if (!g_debugOn) {
         InterlockedExchange(&g_debugOn, 1);
         Menu_OnDebugSwitch(true);
-        Log("debug: ON (%s) | keys: menu %s, playerFly %s, Show triggers %s, off %s", why, Keys_KeyName(KA_MENU),
-            Keys_KeyName(KA_FLY), Keys_KeyName(KA_TRIGGERS), Keys_KeyName(KA_DEBUG));
+        Log("debug: ON (%s) | keys: menu %s, playerFly %s, Show triggers %s, info: target %s, off %s", why,
+            Keys_KeyName(KA_MENU), Keys_KeyName(KA_FLY), Keys_KeyName(KA_TRIGGERS), Keys_KeyName(KA_TARGET),
+            Keys_KeyName(KA_DEBUG));
         return;
     }
     InterlockedExchange(&g_debugOn, 0);
     bool menu = g_menuOpen != 0, flying = g_flying != 0, trig = g_showTriggers, cam = g_showCameraPosition;
+    bool mon = g_monNearby || g_monTarget, frz = g_monFreeze, dmg = g_monDamage;
     Input_SetMenuOpen(false);
     if (flying) Flight_RequestStop();  // like F2, done by the next game frame
     g_showTriggers = false;
     g_showCameraPosition = false;
+    Mon_OnDebugOff();  // task 11: info off, monsters move again, the game's DamageIndicators back
     Menu_OnDebugSwitch(false);
-    Log("debug: OFF (%s)%s%s%s%s - the game gets every key but %s", why, menu ? " | menu closed" : "",
+    Log("debug: OFF (%s)%s%s%s%s%s%s%s - the game gets every key but %s", why, menu ? " | menu closed" : "",
         flying ? (Flight_Attached() ? " | flight ends, the carried player stays (hover)" : " | flight ends") : "",
-        trig ? " | Show triggers off" : "", cam ? " | showCameraPosition off" : "", Keys_KeyName(KA_DEBUG));
+        trig ? " | Show triggers off" : "", cam ? " | showCameraPosition off" : "", mon ? " | monsters info off" : "",
+        frz ? " | freeze monsters off" : "", dmg ? " | damage info off" : "", Keys_KeyName(KA_DEBUG));
     Cursor_Update();
 }

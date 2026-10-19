@@ -162,7 +162,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1665; frame++) {
+    for (int frame = 1; frame <= 1800; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -175,7 +175,7 @@ int main()
         case 3: Key('W'); break;                            // menu closed: must reach the game
         case 4: Say("10a: F10 (WM_SYSKEYDOWN): debug on, not to the game"); SysKey(VK_F10); break;
         case 5: Key(VK_F1); break;                          // open
-        case 8: Key(VK_DOWN); Key(VK_DOWN); break;          // playerFly -> Triggers -> Camera
+        case 8: Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); break;  // playerFly -> Triggers -> Monsters (11) -> Camera
         case 11: Key(VK_RETURN); break;                     // enter category
         case 14: Key(VK_RETURN); break;                     // showCameraPosition on
         case 16: Key('W'); break;                           // menu open: must NOT reach the game
@@ -374,13 +374,13 @@ int main()
         case 1282: Say("08c: playerFly -> playerFly: Enter enters the flight"); Key(VK_DOWN); Key(VK_RETURN); break;  // 09: hover jump is the last of 6
         case 1286: Snapshot("shot24.bmp"); break;
         case 1288: Say("08c: Enter again: flight off"); Key(VK_RETURN); break;
-        case 1292: Say("08d: Camera section: showCameraPosition off, on"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RETURN); break;
+        case 1292: Say("08d: Camera section: showCameraPosition off, on"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RETURN); break;  // 11: + Monsters
         case 1294: Snapshot("shot25.bmp"); break;
         case 1296: Key(VK_RETURN); break;
         case 1298: Say("08e: Menu section: opacity +0.05, text scale +0.25"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); Key(VK_DOWN); Key(VK_RIGHT); break;
         case 1300: Snapshot("shot26.bmp"); break;
         case 1302: Say("08e: back to opacity 0.70, text 1.00"); Key(VK_LEFT); Key(VK_UP); Key(VK_LEFT); break;
-        case 1304: Say("08f: Triggers section: Show triggers by Enter"); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
+        case 1304: Say("08f: Triggers section: Show triggers by Enter"); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
         case 1308: Ctl(8); Snapshot("shot27.bmp"); break;
         case 1310: Say("08f: F3 with the menu open: off"); Key(VK_F3); break;
         case 1312: Snapshot("shot28.bmp"); break;
@@ -442,7 +442,7 @@ int main()
         case 1535: Say("cursor state: released"); Ctl(6); break;
         // ---- task 10: F10 master switch, menu Keys, dbgmenu_keys.ini ----
         case 1540: Say("10b: showCameraPosition on, F3 triggers on, F2 flight, R carried, F1 menu open");
-            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); break;
+            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); break;
         case 1542: Key(VK_F1); break;
         case 1543: Key(VK_F3); break;
         case 1545: Key(VK_F2); break;
@@ -463,24 +463,24 @@ int main()
         case 1582: Key('W'); break;
         case 1584: Click(); break;
         case 1586: Snapshot("shot43.bmp"); break;
-        case 1588: Say("10d: F5 -> menu = F5"); Key(VK_F5); break;
+        case 1588: Say("10d: F6 -> menu = F6"); Key(VK_F6); break;
         case 1590: Snapshot("shot44.bmp"); break;
-        case 1592: Say("10d: F5 closes the menu; F1 now reaches the game"); Key(VK_F5); Key(VK_F1); break;
-        case 1595: Say("10d: Keys > playerFly = F5: conflict, swapped (menu = F2)"); Key(VK_F5); Key(VK_DOWN); Key(VK_RETURN); break;
-        case 1597: Key(VK_F5); break;
+        case 1592: Say("10d: F6 closes the menu; F1 now reaches the game"); Key(VK_F6); Key(VK_F1); break;
+        case 1595: Say("10d: Keys > playerFly = F6: conflict, swapped (menu = F2)"); Key(VK_F6); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1597: Key(VK_F6); break;
         case 1599: Snapshot("shot45.bmp"); break;
         case 1601: Say("10d: attach = Y, time = R"); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
         case 1603: Key('Y'); break;
         case 1604: Key(VK_DOWN); Key(VK_RETURN); break;
         case 1606: Key('R'); break;
         case 1608: Say("10e: the file after the changes"); PrintFile(); break;
-        case 1610: Say("10e: F2 closes the menu, F5 flight, Y carried, T nothing, R time frozen"); Key(VK_F2); break;
-        case 1612: Key(VK_F5); break;
+        case 1610: Say("10e: F2 closes the menu, F6 flight, Y carried, T nothing, R time frozen"); Key(VK_F2); break;
+        case 1612: Key(VK_F6); break;
         case 1615: Key('Y'); break;
         case 1617: Key('T'); break;
         case 1618: Key('R'); break;
         case 1620: Snapshot("shot46.bmp"); break;
-        case 1622: Say("10e: F5: the carried player stays, hover"); Key(VK_F5); break;
+        case 1622: Say("10e: F6: the carried player stays, hover"); Key(VK_F6); break;
         case 1624: Snapshot("shot47.bmp"); break;
         case 1626: KeyDown(VK_SPACE); break;
         case 1628: KeyUp(VK_SPACE); break;
@@ -494,13 +494,93 @@ int main()
         case 1636: Key(VK_F11); break;
         case 1640: Say("10g: file with only menu = F2: playerFly gets the free default F1");
             WriteFile("menu = F2\n"); Ctl(16); break;
-        case 1643: Say("10g: F2 opens the menu; Keys > reset to defaults"); Key(VK_F2); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1643: Say("10g: F2 opens the menu; Keys > reset to defaults"); Key(VK_F2); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;  // 11: + info: target
         case 1645: Snapshot("shot48.bmp"); break;
         case 1647: Key(VK_F1); PrintFile(); break;
         case 1650: Say("10g: read again: no problems"); Ctl(16); break;
         case 1652: Say("10h: F10 off, F1 reaches the game"); SysKey(VK_F10); break;
         case 1654: Key(VK_F1); break;
         case 1660: Say("final cursor state: released"); Ctl(6); break;
+        // ---- task 11: section Monsters (fake actors in monsters.cpp, placed in front of the camera by cmd 17:
+        // Skel_A01 straight ahead 600 units, Ghoul_07 / Ghoul_08 side by side (their labels overlap), Skel_Far
+        // 1400 units (42 m), Behind_01 behind the camera, Vulgrim (NPC), Death (player), Coin_03 (not a character),
+        // one bad object). The menu keys are read by the next overlay frame: F1 that closes the menu comes a frame
+        // later. ----
+        case 1665: Say("11a: debug off: F5 (info: target) reaches the game"); Key(VK_F5); break;
+        case 1667: SysKey(VK_F10); break;
+        case 1669: Ctl(17); break;
+        case 1670: Say("11b: six sections, Monsters after Triggers"); Key(VK_F1); Key(VK_ESCAPE); break;
+        case 1672: Snapshot("shot49.bmp"); break;
+        case 1673: Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // Keys -> Menu -> Camera -> Monsters
+        case 1675: Snapshot("shot50.bmp"); break;
+        case 1676: Say("11b: info: nearby on (level 1, 30 m)"); Key(VK_RETURN); break;
+        case 1677: Key(VK_F1); break;
+        case 1680: Ctl(18); Snapshot("shot51.bmp"); break;
+        case 1682: Say("11b: info level 1 -> 4"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        case 1683: Key(VK_F1); break;
+        case 1686: Snapshot("shot52.bmp"); Ctl(18); break;
+        case 1688: Say("11c: nearby range 30 m -> unlimited: Skel_Far gets a label"); Key(VK_F1); Key(VK_DOWN); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        case 1689: Key(VK_F1); break;
+        case 1692: Snapshot("shot53.bmp"); Ctl(18); break;
+        case 1694: Say("11c: back to 30 m, level 2"); Key(VK_F1); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_UP); Key(VK_LEFT); Key(VK_LEFT); break;
+        case 1695: Key(VK_F1); break;
+        case 1696: Say("11d: F5 -> info: target on (the monster in the centre)"); Key(VK_F5); break;
+        case 1700: Snapshot("shot54.bmp"); Ctl(18); break;
+        case 1702: Say("11e: show: monsters + NPC, all characters"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        case 1703: Key(VK_F1); break;
+        case 1705: Snapshot("shot55.bmp"); Ctl(18); break;
+        case 1707: Key(VK_F1); Key(VK_LEFT); Key(VK_LEFT); break;
+        case 1708: Key(VK_F1); break;
+        case 1710: Say("11f: damage info on, two hits of 25 on Skel_A01"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1711: Key(VK_F1); break;
+        case 1713: Ctl(19); break;
+        case 1716: Ctl(19); break;
+        case 1718: Snapshot("shot56.bmp"); Ctl(18); break;
+        case 1719: Say("11f: the game saves its options: the profile keeps 0, the live value stays 1"); Ctl(24); break;
+        case 1720: Say("11g: freeze monsters on"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1721: Key(VK_F1); break;
+        case 1723: Snapshot("shot57.bmp"); Ctl(18); break;
+        case 1724: Say("11h: freeze + flight with time frozen, then exit: the flag stays 0"); Key(VK_F2); break;
+        case 1726: Key('T'); break;
+        case 1728: Ctl(18); Key(VK_F2); break;
+        case 1730: Say("11h: level load -> freeze off by itself"); Ctl(21); break;
+        case 1732: Ctl(18); break;
+        case 1734: Say("11h: freeze on again, the player dies -> off by itself"); Key(VK_F1); Key(VK_RETURN); break;
+        case 1735: Key(VK_F1); break;
+        case 1736: Ctl(20); break;
+        case 1738: Ctl(18); Ctl(26); break;
+        case 1740: Say("11i: the target is gone from the list -> another target"); Ctl(25); break;
+        case 1742: Ctl(18); Ctl(17); break;
+        case 1744: Say("11j: exception while collecting -> info off"); Ctl(22); break;
+        case 1746: Ctl(18); Snapshot("shot58.bmp"); break;
+        case 1748: Say("11j: nearby + target on again"); Key(VK_F1); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;
+        case 1749: Key(VK_F1); Key(VK_F5); break;
+        case 1750: Say("11k: 300 fake monsters (timing)"); Ctl(23); break;
+        case 1754: Snapshot("shot59.bmp"); Ctl(18); break;
+        case 1756: Ctl(17); break;
+        case 1758: Say("11l: freeze on (damage info is still on), F10 off: everything off, the flags back"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1759: Key(VK_F1); break;
+        case 1760: Ctl(18); break;
+        case 1762: SysKey(VK_F10); break;
+        case 1764: Ctl(18); Snapshot("shot60.bmp"); break;
+        case 1765: Say("11l: debug off: F5 reaches the game"); Key(VK_F5); break;
+        case 1766: Say("11l: F10 on: the Monsters items stay off"); SysKey(VK_F10); break;
+        case 1768: Ctl(18); break;
+        case 1770: Say("11m: Keys > info: target = F7 (F5 back to the game)"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
+        case 1772: Key(VK_F7); break;
+        case 1774: Snapshot("shot61.bmp"); PrintFile(); break;
+        case 1776: Key(VK_F1); break;
+        case 1777: Key(VK_F7); Key(VK_F5); break;
+        case 1779: Snapshot("shot62.bmp"); break;
+        case 1780: Say("11m: reset to defaults"); Key(VK_F7); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1781: Key(VK_F1); break;
+        case 1784: Say("11n: a keys file of v0.9 (no infoTarget line): the line is added with F5"); WriteFile("debug = F10\nmenu = F1\nplayerFly = F2\nshowTriggers = F3\nattach = R\ntime = T\n"); Ctl(16); PrintFile(); break;
+        case 1788: Say("11n: an old file where menu = F5: infoTarget gets another free default"); WriteFile("debug = F10\nmenu = F5\nplayerFly = F2\nshowTriggers = F3\nattach = R\ntime = T\n"); Ctl(16); PrintFile(); break;
+        case 1790: Say("11n: back to the defaults (F5 opens the menu now)"); Key(VK_F5); Key(VK_RETURN); break;
+        case 1791: Key(VK_F1); break;
+        case 1792: Ctl(16); PrintFile(); break;
+        case 1794: Say("final: F10 off"); SysKey(VK_F10); Ctl(18); break;
+        case 1798: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

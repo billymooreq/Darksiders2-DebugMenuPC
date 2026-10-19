@@ -1,4 +1,4 @@
-# Дебаг-меню (DLL v0.7–v0.9, задачи 08–10): устройство и как расширять
+# Дебаг-меню (DLL v0.7–v0.10, задачи 08–11): устройство и как расширять
 
 Код — `src\dbgmenu\menu.cpp` (реестр, клавиши меню, отрисовка, панель showCameraPosition), `keys.cpp` (с v0.9: F10, назначаемые клавиши, `dbgmenu_keys.ini`). Горячие клавиши ловит WndProc в `input.cpp` (`Keys_HotkeyNow` → `RunHotkey`), меню получает клавиши из очереди (`Input_PopKey` → `Menu_HandleKey`, поток рендера = поток игры): обычный vk — навигация, `KQ_ACTION|действие` — горячая клавиша уже выполнена (только лог), `KQ_CAPTURE|vk` — клавиша для раздела Keys.
 
@@ -16,13 +16,21 @@ Main
     Show triggers (shortcut F3) [off]            g_showTriggers (по умолч. off)
     depth                     < through walls | depth >  g_trigDepthMode (по умолч. through walls)
     show disabled             [on]               g_trigShowDisabled (по умолч. on)
+> Monsters             7 >   (v0.10, задача 11, notes/monsters_pc.md)
+    info: nearby              [off]              g_monNearby (подписи над мобами)
+    info: target (shortcut F5) [off]             g_monTarget (панель моба в центре экрана)
+    info level                < 1 Move states | 2 Move & Script states | 3 Move, Script & Cooldowns | 4 Everything >  g_monLevel 0..3
+    nearby range              < 10 m … 30 m … 150 m | unlimited >  g_monRange (по умолч. 30 m)
+    show                      < monsters | monsters + NPC | all characters >  g_monWho
+    damage info               [off]              g_monDamage (опция игры DamageIndicators, пока on)
+    freeze monsters           [off]              g_monFreeze (байт 0x014D4278 = 0)
 > Camera               1 >
     showCameraPosition        [off]              g_showCameraPosition
 > Menu                 2 >
     Panel opacity             < 0.80 >  0.30…1.00 шаг 0.05
     Text scale                < 1.00 >  0.75…2.00 шаг 0.25
-> Keys                 7 >   (v0.9, задача 10, §6)
-    debug on/off / menu / playerFly / Show triggers / attach (in flight) / time (in flight)   [F10] [F1] [F2] [F3] [R] [T]
+> Keys                 8 >   (v0.9, задача 10, §6; v0.10 + info: target)
+    debug on/off / menu / playerFly / Show triggers / attach (in flight) / time (in flight) / info: target   [F10] [F1] [F2] [F3] [R] [T] [F5]
     reset to defaults
 ```
 До 08 (v0.2–v0.6) были Xbox-категории General / Camera / Graphics / Menu. В 08 изменились только раздел и подпись `triggers depth` → `depth`; значения по умолчанию, клавиши, колбэки — те же. Других пунктов в реестре не было (9 пунктов до и после).
@@ -63,3 +71,11 @@ Main
 - Лог: `debug: ON|OFF (клавиша) | menu closed | flight ends … | Show triggers off | showCameraPosition off`, `menu: Keys > X: waiting for a key`, `keys: menu = F5 (was F1); swapped: …`, `keys: … written`, `menu: key not allowed: …`, `menu: key change cancelled (…)`.
 - **Офлайн-тест** (`test_d3d.cpp`; файл ключей — в папке теста; тест-команда **16** = перечитать файл): 10a при старте F1/F2/F3 доходят до «игры», экран пустой (shot0), F10 (WM_SYSKEYDOWN) не доходит; 10b showCameraPosition + F3 + полёт с R + меню → F10: меню закрыто, герой остался и висит, триггеры/панель выключены (shot38/39), F1/F2/F3 доходят до игры, полёт не начинается, T (уже клавиша игры) отпускает зависание; 10c F10 → только надпись (shot41); 10d Keys > menu: Space/W/ЛКМ — отказ (shot43), F5 → menu = F5, F1 теперь доходит до игры; playerFly = F5 → обмен (menu = F2, shot45); attach = Y, time = R; 10e файл записан, полёт F5 / Y / R(время), T — ничего, подсказки с новыми клавишами (shot46/47); 10f битый файл (Space, дубль, неизвестное имя, мусор, повтор, неизвестное действие, `debug = F11`) → по умолчанию где надо, файл не переписан, F10 доходит до игры, F11 выключает/включает; 10g файл `menu = F2` → playerFly = F1; reset to defaults (shot48) → перечитанный файл без проблем; 10h F10 off → F1 до игры. Старые сценарии 03–09 прошли (в начале добавлено F10; кадр 400 — лишний «вниз», т. к. после Menu теперь Keys).
 - **Проверено в игре (2026-10-19):** «всё отлично работает». Лог: файл создан при первом запуске, debug переназначен F10 → F9 (выкл/вкл по F9, F9 в полёте с несомым героем → `flight ends, the carried player stays (hover)`) и обратно на F10, время T, пауза сбалансирована, ошибок нет.
+
+## 7. v0.10 (задача 11): раздел Monsters, клавиша info: target
+- Раздел **Monsters** — 7 строк в `g_commands[]` между Triggers и Camera (порядок разделов: playerFly, Triggers, **Monsters**, Camera, Menu, Keys). Устройство и поля — `monsters_pc.md`.
+- Новое действие **KA_TARGET** (после KA_TIME, перед KA_COUNT): имя в файле `infoTarget`, подпись `info: target`, по умолчанию **F5** (F4 запрещена из-за Alt+F4), токен `{target}`, работает при `g_debugOn` (`Keys_HotkeyNow`), `RunHotkey` → `Mon_ToggleTarget()`. В разделе Keys — строка перед reset to defaults; reset — F10, F1, F2, F3, R, T, F5.
+- **Файл старой версии**: если единственные «проблемы» — нет строк действий новее v0.9 (`a >= KA_TARGET`), файл **дописывается** (лог `… action of a newer version added`), строки игрока не меняются; занята его клавиша по умолчанию (напр. `menu = F5`) → первое свободное значение по умолчанию (F1). Остальные правила разбора — как в §6.
+- **F10 off** дополнительно: `Mon_OnDebugOff()` — nearby/target/damage/freeze off, флаги игры назад; лог `| monsters info off | freeze monsters off | damage info off`.
+- Сводка Monsters — внизу слева над строкой триггеров (при включённых триггерах поднимается на 1.45 строки); панель цели — справа с 40 % высоты.
+- Офлайн-тест: старые сценарии — навигация к Camera +1 «вниз» (кадры 8, 1292, 1540), к Triggers от Menu +1 «вверх» (1304), Keys > reset +1 «вниз» (1643); в 10d/10e клавиша F5 заменена на F6 (F5 теперь info: target). Новые 11a–11n — `monsters_pc.md` §4. Особенность теста: клавиши меню читает следующий кадр оверлея, а F1 срабатывает сразу — закрывать меню надо отдельным кадром.

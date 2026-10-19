@@ -167,6 +167,7 @@ static void FrameInner(IDirect3DDevice9 *dev)
         ImGui::NewFrame();
         Trig_Draw2D();  // background draw list: under the menu panels
         Trig_DrawStatus();
+        if (g_debugOn) Mon_Draw2D();  // task 11: monster labels (background), target panel, summary line
         Menu_Draw();
         Info_Draw();
         ImGui::Render();

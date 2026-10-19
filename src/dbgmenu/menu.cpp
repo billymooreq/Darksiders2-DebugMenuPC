@@ -40,9 +40,18 @@ static void On_Hover();
 static void On_FreezeTime();
 static void On_Attach();
 static void Cmd_KeysDefault();
+static void On_MonNearby();
+static void On_MonTarget();
+static void On_MonDamage();
+static void On_MonFreeze();
 
 static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
 static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // order of TD_WALLS / TD_DEPTH
+// task 11: the Xbox showCharacterInfo levels (1..4), the nearby range (monsters.cpp kRangeM), who is shown (MW_*)
+static const char *const kMonLevelNames[] = {"1 Move states", "2 Move & Script states", "3 Move, Script & Cooldowns",
+                                             "4 Everything"};
+static const char *const kMonRangeNames[] = {"10 m", "20 m", "30 m", "50 m", "75 m", "100 m", "150 m", "unlimited"};
+static const char *const kMonWhoNames[] = {"monsters", "monsters + NPC", "all characters"};
 
 #define KEY_DESC "Enter, then press the new key (Esc - cancel). A key another action has is swapped. Not allowed: " \
                  "Esc, Enter, arrows, W A S D C, Space, Shift, Ctrl, Alt, Win, Tab, Backspace, F4, Print Screen, " \
@@ -84,6 +93,29 @@ static const Command g_commands[] = {
      CT_ENUM, On_TrigDepth, NULL, NULL, 0, 0, 0, KA_NONE, &g_trigDepthMode, kTrigDepthNames, 2},
     {"Triggers", "show disabled", "Also draw the switched-off triggers (gray, paler).",
      CT_TOGGLE, On_ShowDisabled, &g_trigShowDisabled, NULL, 0, 0, 0, KA_NONE},
+    // ---- Monsters (task 11: Xbox AI showCharacterInfo / showCharacterDamageInfo / toggleMonsterUpdate) ----
+    {"Monsters", "info: nearby", "Labels over the monsters around (like the Xbox showCharacterInfo): name, HP and "
+     "level, then what the info level adds. How far: nearby range; nearest first, a label that would cover another "
+     "one moves up or is left out.",
+     CT_TOGGLE, On_MonNearby, &g_monNearby, NULL, 0, 0, 0, KA_NONE},
+    {"Monsters", "info: target", "A panel on the right with everything about the monster in the centre of the "
+     "screen (the one the camera looks at, any distance; yellow corners mark it). {target} switches it.",
+     CT_TOGGLE, On_MonTarget, &g_monTarget, NULL, 0, 0, 0, KA_TARGET},
+    {"Monsters", "info level", "The Xbox levels: 1 move state; 2 + AI behaviour (the script state); 3 + attack "
+     "cooldowns; 4 everything: + target and distance, damage / defense / resistance, position.",
+     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, KA_NONE, &g_monLevel, kMonLevelNames, 4},
+    {"Monsters", "nearby range", "How far from the camera the labels go (1 m is about 33 game units).",
+     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, KA_NONE, &g_monRange, kMonRangeNames, 8},
+    {"Monsters", "show", "monsters: only enemies; + NPC: also the other characters; all: also the player.",
+     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, KA_NONE, &g_monWho, kMonWhoNames, 3},
+    {"Monsters", "damage info", "Like the Xbox showCharacterDamageInfo: the game's own damage numbers over the "
+     "enemies you hit (and the hit direction on the screen); the labels and the panel add the last hit and the "
+     "total. Only while on: your saved game settings are not changed.",
+     CT_TOGGLE, On_MonDamage, &g_monDamage, NULL, 0, 0, 0, KA_NONE},
+    {"Monsters", "freeze monsters", "Like the Xbox toggleMonsterUpdate: the monsters stop - no moving, no attacks; "
+     "the player and the rest of the world go on (you can hit them and walk around). Off: they go on from where "
+     "they stopped. Also off by itself on a level load, the player's death and {debug} off.",
+     CT_TOGGLE, On_MonFreeze, &g_monFreeze, NULL, 0, 0, 0, KA_NONE},
     // ---- Camera ----
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
      CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, KA_NONE},
@@ -104,7 +136,9 @@ static const Command g_commands[] = {
      CT_KEY, NULL, NULL, NULL, 0, 0, 0, KA_ATTACH},
     {"Keys", "time (in flight)", "In a flight: freeze / run the time. " KEY_DESC,
      CT_KEY, NULL, NULL, NULL, 0, 0, 0, KA_TIME},
-    {"Keys", "reset to defaults", "All keys back to F10, F1, F2, F3, R, T (the file is rewritten).",
+    {"Keys", "info: target", "Shows and hides the Monsters info: target panel. " KEY_DESC,
+     CT_KEY, NULL, NULL, NULL, 0, 0, 0, KA_TARGET},
+    {"Keys", "reset to defaults", "All keys back to F10, F1, F2, F3, R, T, F5 (the file is rewritten).",
      CT_ACTION, Cmd_KeysDefault, NULL, NULL, 0, 0, 0, KA_NONE},
 };
 static const int kNumCommands = sizeof(g_commands) / sizeof(g_commands[0]);
@@ -152,7 +186,8 @@ static const char *Where()
 // task 10: "{fly}" -> the current key of that action ("F2")
 static void ExpandKeys(const char *src, char *dst, int size)
 {
-    static const char *const kTokens[KA_COUNT] = {"", "{debug}", "{menu}", "{fly}", "{triggers}", "{attach}", "{time}"};
+    static const char *const kTokens[KA_COUNT] = {"", "{debug}", "{menu}", "{fly}", "{triggers}", "{attach}", "{time}",
+                                                  "{target}"};
     int o = 0;
     while (*src && o < size - 1) {
         int a = KA_COUNT;
@@ -225,10 +260,15 @@ static void On_Attach()
 static void Cmd_KeysDefault()
 {
     Keys_ResetDefaults();
-    Menu_Status("keys: defaults (%s debug, %s menu, %s playerFly, %s triggers, %s attach, %s time)",
+    Menu_Status("keys: defaults (%s debug, %s menu, %s playerFly, %s triggers, %s attach, %s time, %s target)",
                 Keys_KeyName(KA_DEBUG), Keys_KeyName(KA_MENU), Keys_KeyName(KA_FLY), Keys_KeyName(KA_TRIGGERS),
-                Keys_KeyName(KA_ATTACH), Keys_KeyName(KA_TIME));
+                Keys_KeyName(KA_ATTACH), Keys_KeyName(KA_TIME), Keys_KeyName(KA_TARGET));
 }
+// task 11: Monsters (the flags change in the next game frame, monsters.cpp)
+static void On_MonNearby() { Menu_Status("info: nearby %s", g_monNearby ? "on" : "off"); }
+static void On_MonTarget() { Menu_Status("info: target %s", g_monTarget ? "on" : "off"); }
+static void On_MonDamage() { Menu_Status("damage info %s", g_monDamage ? "on" : "off"); }
+static void On_MonFreeze() { Menu_Status("freeze monsters %s", g_monFreeze ? "on" : "off"); }
 
 static void Execute(const Command *c)
 {
@@ -311,6 +351,7 @@ void Menu_HandleKey(int vk)
         else if (a == KA_MENU) Log(g_menuOpen ? "menu: opened at %s" : "menu: closed at %s", Where());
         else if (a == KA_FLY) Log("menu: %s -> playerFly", Keys_KeyName(a));
         else if (a == KA_TRIGGERS) Log("menu: %s -> Show triggers %s", Keys_KeyName(a), g_showTriggers ? "on" : "off");
+        else if (a == KA_TARGET) Log("menu: %s -> info: target %s", Keys_KeyName(a), g_monTarget ? "on" : "off");
         return;
     }
     if (!g_menuOpen || g_keyCapture) return;

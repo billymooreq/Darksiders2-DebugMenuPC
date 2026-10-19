@@ -1,13 +1,13 @@
 # Darksiders2-DebugMenu
 
-Порт маленькой части дебаг-меню из DEBUG-сборки Xbox 360 в **PC-версию Darksiders II 2012 года** (x86, не Deathinitive Edition): свободная камера с телепортом (`playerFly`) и показ триггеров. Внедрение — прокси-DLL `dinput8.dll` рядом с игрой, меню — свой оверлей поверх D3D9.
+Порт маленькой части дебаг-меню из DEBUG-сборки Xbox 360 в **PC-версию Darksiders II 2012 года** (x86, не Deathinitive Edition): свободная камера с телепортом (`playerFly`), показ триггеров, сведения о монстрах и их заморозка (раздел Monsters). Внедрение — прокси-DLL `dinput8.dll` рядом с игрой, меню — свой оверлей поверх D3D9.
 Это приватная копия рабочей папки `_claudework\` с историей по задачам (тег `review-NN` = конец задачи NN). Память ассистента — `CLAUDE.md.copy` (оригинал лежит в корне проекта, на уровень выше).
 
 ## Структура
 | путь | что |
 |---|---|
-| `notes/` | ревью задач `review_NN_*.md`, журналы `progress_NN.md`, заметки: `xbox_pc_map.md` (адреса PC), `playerfly_pc.md`, `triggers_pc.md`, `playerfly_xbox.md`, `plan_architecture.md`, `game_changes.md` |
-| `src/` | исходники DLL: `proxy_dinput8/` (v0.1), `dbgmenu/` (меню, сейчас v0.8: разделы playerFly / Triggers / Camera / Menu; полёт со временем и героем перед камерой; тест `dbgmenu/test/`), `third_party/` (ImGui, MinHook — `VERSIONS.md`) |
+| `notes/` | ревью задач `review_NN_*.md`, журналы `progress_NN.md`, заметки: `xbox_pc_map.md` (адреса PC), `playerfly_pc.md`, `triggers_pc.md`, `menu_pc.md`, `monsters_pc.md`, `playerfly_xbox.md`, `plan_architecture.md`, `game_changes.md` |
+| `src/` | исходники DLL: `proxy_dinput8/` (v0.1), `dbgmenu/` (меню, сейчас v0.10: разделы playerFly / Triggers / Monsters / Camera / Menu / Keys; F10 — главный выключатель; тест `dbgmenu/test/`), `third_party/` (ImGui, MinHook — `VERSIONS.md`) |
 | `build/` | собранные DLL + `README.md` для пользователя (как поставить/убрать) |
 | `scripts/` | Python-инструменты (x86-поиск `pcfind.py`, PE/строки, RTTI, Xbox-дизассемблер), раннеры `ghidra_*.bat`, `msvc32.bat`, `ghidra/*.java`, `sync_brain.ps1` |
 | `dumps/` | PE-сводки, строки exe, декомпиляция (`decomp_pc/`, `decomp_xbox/`) |
