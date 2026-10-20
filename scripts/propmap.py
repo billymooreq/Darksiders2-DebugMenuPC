@@ -48,18 +48,19 @@ def copy_off(fn):
     return None
 
 
-sub = sys.argv[1].lower() if len(sys.argv) > 1 else ""
-seen = set()
-for va in range(R0, R1 - 0x40, 4):
-    init, cp = u32(va + 0x3C), u32(va + 0x38)
-    if not (T0 <= init < T1 and T0 <= cp < T1):
-        continue
-    name = init_name(init)
-    if not name or sub not in name.lower():
-        continue
-    off = copy_off(cp)
-    key = (va, name)
-    if key in seen:
-        continue
-    seen.add(key)
-    print(f"vt {va:08X}  {name:40s} off={'?' if off is None else hex(off)}  (copy {cp:08X}, init {init:08X})")
+if __name__ == "__main__":
+    sub = sys.argv[1].lower() if len(sys.argv) > 1 else ""
+    seen = set()
+    for va in range(R0, R1 - 0x40, 4):
+        init, cp = u32(va + 0x3C), u32(va + 0x38)
+        if not (T0 <= init < T1 and T0 <= cp < T1):
+            continue
+        name = init_name(init)
+        if not name or sub not in name.lower():
+            continue
+        off = copy_off(cp)
+        key = (va, name)
+        if key in seen:
+            continue
+        seen.add(key)
+        print(f"vt {va:08X}  {name:40s} off={'?' if off is None else hex(off)}  (copy {cp:08X}, init {init:08X})")

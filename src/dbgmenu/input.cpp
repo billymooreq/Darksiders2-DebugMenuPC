@@ -182,6 +182,9 @@ static void RunHotkey(int act)
     case KA_TARGET:
         if (g_overlayReady) Mon_ToggleTarget();  // task 11: Monsters > info: target
         break;
+    case KA_TRIGTARGET:
+        if (g_overlayReady) Trig_ToggleTarget();  // task 13: Triggers > info: target
+        break;
     }
     PushKey(KQ_ACTION | act);
 }

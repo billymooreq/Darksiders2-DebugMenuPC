@@ -17,9 +17,19 @@
 //   through walls: ImGui background lines at Present. depth: D3D lines with z-test against the bound depth buffer,
 //     drawn at the entry of the HUD pass 0x00B3B8D2 (after the 3D scene), else at Present; no usable depth
 //     buffer -> through walls for that frame.
+// Task 13 (notes/triggers_pc.md §7): info about the triggers like Monsters - labels near the player (info: nearby),
+//   the panel of the trigger in the centre of the screen (info: target, F6) with its highlight, Display switches.
+//   Fields: name (+0x50), class chain, every reflection property (reflect.cpp), TriggerRegion OnEnterList /
+//   OnExitList "Object:Event" (0x008C8E8C sends the event to the named objects), FilterList / NameFilter,
+//   OneShot +0x11C, Enable +0x11D, Exclude +0x11E, RequireInWorld +0x11F, done once +0x120 / +0x121, listeners
+//   (WorldObject +0x64 list), LoadOnEnter region ids -> names (world.cpp), the player inside (body +0xD4 list) and
+//   our enter / exit counts (task 09 hooks). Read in the game frame right after the collection (objects alive),
+//   drawn at Present from text only.
 #include "common.h"
 #include <math.h>
 #include <stdio.h>
+#include <string.h>
+#include <float.h>
 #include "imgui.h"
 
 bool g_showTriggers;
@@ -60,6 +70,7 @@ struct TItem {
     float rad;       // sphere radius / bounding radius
     BYTE draw, shape, trig, enabled;
     UINT_PTR vt;
+    void *obj;       // task 13: valid only inside Trig_Frame (the info is read there)
 };
 static TItem s_items[kMaxItems];
 static int s_numItems;
@@ -108,7 +119,8 @@ static double NowMs()
 
 // ======================= offline test: fake EventManager (DBGMENU_TEST=1, not the game) =======================
 static void *s_fakeVtDet[0x60 / 4], *s_fakeVtTrig[0x60 / 4], *s_fakeVtActor[0x60 / 4];
-static __declspec(align(16)) BYTE s_fakeObj[16][0xE0];
+static const int kFakeSize = 0x180;   // task 13: up to the fields of the trigger info (+0x170 = the fake class)
+static __declspec(align(16)) BYTE s_fakeObj[16][kFakeSize];
 static struct FakeNode { FakeNode *next; void *obj; } s_fakeNodes[20];
 static BYTE s_fakeEvm[0x20];
 static int s_fakeMode;  // 0 = normal, 9 = empty (level unloaded), 10 = broken list, 14 = 8000 objects (timing)
@@ -122,7 +134,7 @@ static void FakeObj(int i, void **vt, int shape, float x, float y, float z, floa
                     bool enabled)
 {
     BYTE *o = s_fakeObj[i];
-    memset(o, 0, 0xE0);
+    memset(o, 0, kFakeSize);
     *(void ***)o = vt;
     *(int *)(o + OFS_OBJ_SHAPE) = shape;
     float *p = (float *)(o + OFS_OBJ_POS), *r = (float *)(o + OFS_OBJ_ROT), *s = (float *)(o + OFS_OBJ_SCALE);
@@ -130,6 +142,88 @@ static void FakeObj(int i, void **vt, int shape, float x, float y, float z, floa
     r[2] = rz;
     s[0] = sx; s[1] = sy; s[2] = sz;
     o[OFS_OBJ_ENABLED] = enabled;
+}
+
+// task 13: classes, names and fields of the fake triggers for the trigger info (layout of the real TriggerRegion:
+// +0xE0 FilterList, +0xF8 NameFilter, +0x104 OnEnterList, +0x11C OneShot ...; +0x130 Waypoint, +0x150 MaxDistance,
+// +0x164 LoadOnEnter are the fake places of the other classes; +0x170 = the fake class)
+enum { FK_DET, FK_TRIG, FK_KILL, FK_SCRIPTKILL, FK_LOAD, FK_CAM, FK_HANDLER, FK_COUNT };
+static __declspec(align(8)) BYTE s_fCls[FK_COUNT][0x30];
+static void *s_fClsProps[FK_COUNT][8];
+static __declspec(align(8)) DWORD s_fNames[8][2];
+static BYTE s_fakePlayer[16];
+static __declspec(align(8)) BYTE s_fHandler[0x180], s_fNode[0x10], s_fBody[0x40];
+static void *s_fBodyObjs[4];
+static int s_fBodyCounts[4];
+static BYTE s_fDoneEnter;
+static DWORD s_fLoads[2][4] = {{2, (DWORD)-1, 3, 1}, {1, (DWORD)-1, 0, 0}};
+static void *__fastcall FakeClassOf(void *self, void *) { return *(void **)((BYTE *)self + 0x170); }
+__declspec(naked) static void FakeObjGetName() { __asm { lea eax, [ecx + 0x50] } __asm { ret } }
+
+static void FakeArr(BYTE *o, int ofs, void *data, int n)
+{
+    *(void **)(o + ofs) = data;
+    *(int *)(o + ofs + 4) = n;
+    *(int *)(o + ofs + 8) = n;
+}
+
+static void FakeInfoFields()
+{
+    static const char *const kCls[FK_COUNT] = {"DetectorObject", "TriggerRegion", "KillRegion", "killregiontrigger",
+                                               "LoadRegion", "CameraInfluenceTriggerRegion", "TriggerEventHandler"};
+    // property indexes of reflect.cpp kFakeProps
+    static const int kProps[FK_COUNT][8] = {{0, 5, 6, -1}, {1, 2, 3, 4, 7, 8, 9, 13}, {10, -1}, {-1}, {12, -1},
+                                            {11, -1}, {0, -1}};
+    static const int kParent[FK_COUNT] = {-1, FK_DET, FK_TRIG, FK_KILL, FK_DET, FK_DET, -1};
+    for (int c = 0; c < FK_COUNT; c++) {
+        int n = 0;
+        for (int k = 0; k < 8 && kProps[c][k] >= 0; k++) s_fClsProps[c][n++] = Refl_FakeProp(kProps[c][k]);
+        Refl_FakeClass(s_fCls[c], kCls[c], kParent[c] >= 0 ? s_fCls[kParent[c]] : NULL, s_fClsProps[c], n);
+    }
+    void **vts[3] = {s_fakeVtDet, s_fakeVtTrig, s_fakeVtActor};
+    for (int v = 0; v < 3; v++) {
+        vts[v][1] = (void *)FakeClassOf;
+        vts[v][0x2C / 4] = (void *)FakeObjGetName;
+        vts[v][0x38 / 4] = (void *)Refl_FakeGetPos;
+    }
+    static const char *const kNames[10] = {"Door_Z2_Trigger", "KillReg_Pit_01", "LoadRegion_02", "CamInfl_01",
+                                           "Capsule_Trg", "Disabled_Trg", "Big_LoadRegion", "Behind_Det", "",
+                                           "Odd_Shape"};
+    static const int kKind[10] = {FK_TRIG, FK_SCRIPTKILL, FK_LOAD, FK_CAM, FK_TRIG, FK_TRIG, FK_LOAD, FK_DET, -1, FK_DET};
+    static const char *const kStr[8] = {"Player", "Horse", "Door_01:Open", "Z2_Cine_VSM", "Hub_01_KillReg_Wpt",
+                                        "Z2_Door_VSM", "Monster", ""};
+    for (int i = 0; i < 8; i++) Refl_FakeName(s_fNames[i], kStr[i]);
+    for (int i = 0; i < 10; i++) {
+        BYTE *o = s_fakeObj[i];
+        *(void **)(o + 0x170) = kKind[i] >= 0 ? s_fCls[kKind[i]] : NULL;
+        Refl_FakeName(o + 0x50, kNames[i][0] ? kNames[i] : NULL);
+        *(int *)(o + 0x14) = 100 + i;
+        if (kKind[i] == FK_TRIG || kKind[i] == FK_SCRIPTKILL) {
+            o[0x11C] = i == 0;           // OneShot
+            o[0x11D] = i != 5;           // Enable
+            o[0x11F] = 1;                // RequireInWorld
+            FakeArr(o, 0xE0, s_fNames, i == 0 ? 2 : 1);  // FilterList Player (, Horse)
+        }
+        if (kKind[i] == FK_LOAD) FakeArr(o, 0x164, s_fLoads[i == 2 ? 0 : 1], i == 2 ? 2 : 1);
+    }
+    BYTE *door = s_fakeObj[0];
+    *(DWORD *)(door + 0x140) = 2;               // IncludeGrabbables (bit 1)
+    FakeArr(door, 0x104, s_fNames[2], 2);       // OnEnterList Door_01:Open, Z2_Cine_VSM
+    door[0x120] = s_fDoneEnter;
+    *(void **)(door + 0x64) = s_fNode;          // listeners: a script handler
+    memset(s_fHandler, 0, sizeof(s_fHandler));
+    *(void ***)s_fHandler = s_fakeVtDet;
+    *(void **)(s_fHandler + 0x170) = s_fCls[FK_HANDLER];
+    Refl_FakeName(s_fHandler + 0x50, kStr[5]);
+    memset(s_fNode, 0, sizeof(s_fNode));
+    *(void **)(s_fNode + 4) = s_fHandler;
+    *(void **)(door + 0xD4) = s_fBody;          // the body: is the player inside
+    *(void **)(s_fBody + 0x24) = door;
+    *(void ***)(s_fBody + 0x28) = s_fBodyObjs;
+    *(int **)(s_fBody + 0x34) = s_fBodyCounts;
+    Refl_FakeName(s_fakeObj[1] + 0x130, kStr[4]);                    // KillRegion Waypoint
+    *(float *)(s_fakeObj[3] + 0x150) = 450.0f;                       // MaxDistance
+    *(void ***)s_fakePlayer = s_fakeVtActor;
 }
 
 // the fake camera starts at (100, 200, 300) looking along +X (game.cpp), Z up
@@ -149,18 +243,19 @@ static void FakeBuild()
     FakeObj(n++, s_fakeVtDet, 0, -900, 200, 300, 200, 200, 200, 0, true);     // behind the camera (culled)
     FakeObj(n++, s_fakeVtActor, 0, 700, 200, 300, 50, 50, 50, 0, true);       // actor in the same list: filtered out
     FakeObj(n++, s_fakeVtDet, 7, 700, 200, 100, 100, 100, 50, 0, true);       // unknown shape -> AABB
+    FakeInfoFields();  // task 13: classes, names and fields of the trigger info
     int used = n;
     if (s_fakeMode == 9) used = 0;
     if (s_fakeMode == 14) {  // a 20 x 20 x 20 grid ahead of the camera, every shape, every 5th disabled
         if (!s_fakeBigObj) {
-            s_fakeBigObj = (BYTE *)VirtualAlloc(NULL, kFakeBig * 0xE0, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+            s_fakeBigObj = (BYTE *)VirtualAlloc(NULL, kFakeBig * kFakeSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
             s_fakeBigNodes = (FakeNode *)VirtualAlloc(NULL, kFakeBig * sizeof(FakeNode), MEM_COMMIT | MEM_RESERVE,
                                                       PAGE_READWRITE);
         }
         if (s_fakeBigObj && s_fakeBigNodes) {
             for (int i = 0; i < kFakeBig; i++) {
-                BYTE *o = s_fakeBigObj + i * 0xE0;
-                memset(o, 0, 0xE0);
+                BYTE *o = s_fakeBigObj + i * kFakeSize;
+                memset(o, 0, kFakeSize);
                 *(void ***)o = (i % 7) ? s_fakeVtDet : s_fakeVtTrig;
                 *(int *)(o + OFS_OBJ_SHAPE) = i % 4;
                 float *p = (float *)(o + OFS_OBJ_POS), *r = (float *)(o + OFS_OBJ_ROT), *s = (float *)(o + OFS_OBJ_SCALE);
@@ -332,6 +427,7 @@ static int ReadNode(BYTE *node, BYTE **next, bool wantClasses)
         const float *p = (const float *)(o + OFS_OBJ_POS), *rot = (const float *)(o + OFS_OBJ_ROT);
         const float *sc = (const float *)(o + OFS_OBJ_SCALE);
         it.vt = (UINT_PTR)vt;
+        it.obj = obj;
         it.trig = IsTriggerRegion(it.vt);
         it.enabled = o[OFS_OBJ_ENABLED] != 0;
         it.shape = (BYTE)(shape >= 0 && shape <= 3 ? shape : 4);
@@ -498,6 +594,11 @@ static void CollectInner()
     s_st.evms = nd;
 }
 
+static void InfoFrame();
+static void InfoOff();
+static void InfoTurnOff(const char *why);
+static void FakeInfoFields();
+
 static void TurnOff(const char *why)
 {
     g_showTriggers = false;
@@ -510,8 +611,10 @@ void Trig_Frame()
     InterlockedIncrement(&s_frame);
     if (s_capture > 0)
         Log("triggers: timeline: ---- frame %s ----", InterlockedDecrement(&s_capture) == 1 ? "start" : "end");
-    if (!g_showTriggers) {
+    bool info = g_trigNearby || g_trigTarget;  // task 13: the info needs the list too (also without contours)
+    if (!g_showTriggers && !info) {
         s_wasOn = false;
+        InfoOff();
         return;
     }
     if (!g_gameMatch && !g_testMode) return;
@@ -529,8 +632,11 @@ void Trig_Frame()
     } __except (CatchTr("trigger collection", GetExceptionInformation())) {
         s_numItems = 0;
         TurnOff("exception while collecting");
+        InfoTurnOff("exception while collecting");
         return;
     }
+    if (info) InfoFrame();
+    else InfoOff();
     double dt = NowMs() - t0;
     s_lastCollectMs = dt;
     s_collectMs += dt;
@@ -1062,9 +1168,12 @@ void Trig_D3DEvent(int type, IDirect3DDevice9 *dev, DWORD a, DWORD b, void *p)
 }
 
 // ======================= status line =======================
+bool Trig_StatusShown() { return g_showTriggers || g_trigNearby || g_trigTarget; }
+static void InfoStatus();
+
 void Trig_DrawStatus()
 {
-    if (!g_showTriggers) return;
+    if (!Trig_StatusShown()) return;
     float fs = ImGui::GetFontSize();
     ImGuiIO &io = ImGui::GetIO();
     // bottom left, above the playerFly / hover line (bottom centre)
@@ -1076,10 +1185,17 @@ void Trig_DrawStatus()
                      ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoScrollbar |
                      ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::SetWindowFontScale(0.8f);
-    ImGui::Text("triggers: %d drawn / %d total", ViewFresh() ? s_drawn : 0, s_numItems);
-    ImGui::SameLine();
-    if (g_trigDepthMode == TD_DEPTH) ImGui::TextDisabled(s_depthNA ? "[depth: n/a, through walls]" : "[depth]");
-    else ImGui::TextDisabled("[through walls]");
+    if (g_showTriggers) {
+        ImGui::Text("triggers: %d drawn / %d total", ViewFresh() ? s_drawn : 0, s_numItems);
+        ImGui::SameLine();
+        if (g_trigDepthMode == TD_DEPTH) ImGui::TextDisabled(s_depthNA ? "[depth: n/a, through walls]" : "[depth]");
+        else ImGui::TextDisabled("[through walls]");
+    } else {
+        ImGui::Text("triggers: %d total", s_numItems);
+        ImGui::SameLine();
+        ImGui::TextDisabled("[contours off]");
+    }
+    InfoStatus();
     ImGui::End();
 }
 
@@ -1099,6 +1215,36 @@ void Trig_DrawStatus()
 #define OFS_BODY_COUNTS    0x34
 static volatile LONG s_detLogBudget;
 static LONG s_detEnter, s_detExit;
+
+// task 13: the player's enter / exit count and times per detector (state line of the trigger info)
+struct DetStat { void *det; int enter, exit; DWORD lastEnter, lastExit; };
+static DetStat s_detStat[1024];
+static DetStat *DetStatOf(void *d, bool add)
+{
+    unsigned h = ((unsigned)(UINT_PTR)d >> 4) & 1023;
+    for (int i = 0; i < 32; i++) {
+        DetStat &e = s_detStat[(h + i) & 1023];
+        if (e.det == d) return &e;
+        if (!e.det) {
+            if (!add) return NULL;
+            memset(&e, 0, sizeof(e));
+            e.det = d;
+            return &e;
+        }
+    }
+    if (!add) return NULL;
+    DetStat &e = s_detStat[h];  // full around h: reuse
+    memset(&e, 0, sizeof(e));
+    e.det = d;
+    return &e;
+}
+static void DetCount(void *d, bool enter)
+{
+    DetStat *e = d ? DetStatOf(d, true) : NULL;
+    if (!e) return;
+    if (enter) e->enter++, e->lastEnter = GetTickCount() | 1;
+    else e->exit++, e->lastExit = GetTickCount() | 1;
+}
 
 static UINT_PTR PlayerVt()
 {
@@ -1138,6 +1284,7 @@ void Trig_OnDetectorAdd(void *body, void *collidable)
         if (!obj || *(UINT_PTR *)obj != PlayerVt()) return;
         if (PlayerIndex((BYTE *)body, obj) >= 0) return;  // another collidable of the player: count++ only
         s_detEnter++;
+        DetCount(*(void **)((BYTE *)body + OFS_BODY_DETECTOR), true);
         DetectorLog((BYTE *)body, "ENTER");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
@@ -1151,6 +1298,7 @@ void Trig_OnDetectorRemove(void *body, void *obj)
         int *counts = *(int **)((BYTE *)body + OFS_BODY_COUNTS);
         if (i < 0 || !counts || counts[i] != 1) return;  // still overlapping with another collidable
         s_detExit++;
+        DetCount(*(void **)((BYTE *)body + OFS_BODY_DETECTOR), false);
         DetectorLog((BYTE *)body, "EXIT ");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
     }
@@ -1191,12 +1339,994 @@ static void TestDetectorEvents()
     Log("test: detector events: enter %ld (expected 1), exit %ld (expected 1)", s_detEnter - e0, s_detExit - x0);
 }
 
+// ======================= task 13: trigger info (like Monsters, notes/triggers_pc.md §7) =======================
+bool g_trigNearby, g_trigTarget;
+int g_trigRange = 2;                               // 30 m
+bool g_trigShow[TF_COUNT] = {true, true, true};    // name, class, leads to
+
+#define TSPRINTF(buf, ...) _snprintf_s(buf, sizeof(buf), _TRUNCATE, __VA_ARGS__)
+#define TSTRCPY(buf, src) strncpy_s(buf, sizeof(buf), src, _TRUNCATE)
+#define TSTRCAT(buf, src) strncat_s(buf, sizeof(buf), src, _TRUNCATE)
+#define OFS_OBJ_NAME_T     0x50
+#define OFS_OBJ_LISTENERS  0x64   // WorldObject: {+0 ?, +4 listener, +8 next, +0xC off} (0x00A7DE70, sent by 0x00676F02)
+#define OFS_OBJ_BODY       0xD4
+#define OFS_TR_DONE_ENTER  0x120  // TriggerRegion: onEnter / onExit done once (0x008C77F9 / 0x008C7861, OneShot)
+#define OFS_TR_DONE_EXIT   0x121
+#define PC_VT_CLASS_SCRIPT 0x01166A08u  // descriptor of a scripted class
+
+static const float kTRangeM[] = {10, 20, 30, 50, 75, 100, 150, 0};  // 0 = unlimited
+static const float kTUnitsPerM = 100.0f;                              // 1 unit = 1 cm (monsters_pc.md)
+static const int kTMaxLabels = 48, kInfoSlots = 64, kRefreshFrames = 15, kAllLines = 96;
+static const ImU32 kTgtCol = IM_COL32(255, 220, 0, 255);
+
+struct TInfo {
+    void *obj;
+    LONG read, used;            // frame of the last full reading / of the last use
+    bool trigRegion, inside, enabled, scripted;
+    char name[64], cls[48], chain[160];
+    char dest[400], destShort[96];
+    char events[480], eventsShort[96];
+    char filter[240], flags[200], state[200];
+    int nProps, nUnread;
+};
+static TInfo s_info[kInfoSlots];
+static struct { int item; TInfo *info; float dist; } s_lab[kTMaxLabels];
+static int s_numLab, s_inRange, s_labDrawn, s_labSkipped;
+static void *s_tObj;                // the target (its object; compared only, never read outside Trig_Frame)
+static int s_tItem = -1;
+static TInfo *s_tInfo;
+static char s_tHow[48];
+static float s_tDist;               // camera -> target (units, the ray hit or the centre)
+static char s_tAll[kAllLines][176];
+static int s_tAllN, s_tAllTotal;
+static LONG s_tAllRead = -1000;
+static float s_ref[3], s_cam[3];
+static bool s_refOk, s_refCam, s_camOk;
+static void *s_player;
+static bool s_infoWasOn;
+static volatile LONG s_tLogBudget, s_infoExBudget, s_infoStatsBudget;
+static bool s_infoThrow;
+static double s_infoMs, s_infoMax;
+static int s_infoN;
+
+void Trig_ShowAll(bool on)
+{
+    for (int i = 0; i < TF_COUNT; i++) g_trigShow[i] = on;
+}
+
+void Trig_ToggleTarget()
+{
+    g_trigTarget = !g_trigTarget;
+    Menu_Status("Triggers > info: target %s", g_trigTarget ? "on" : "off");
+}
+
+void Trig_OnDebugOff()
+{
+    g_trigNearby = g_trigTarget = false;
+    InfoOff();
+}
+
+static void InfoOff()
+{
+    if (!s_infoWasOn) return;
+    s_infoWasOn = false;
+    s_numLab = s_inRange = 0;
+    s_tObj = NULL;
+    s_tItem = -1;
+    s_tInfo = NULL;
+    for (int i = 0; i < kInfoSlots; i++) s_info[i].obj = NULL;
+    Log("triggers: info OFF");
+}
+
+static void InfoTurnOff(const char *why)
+{
+    if (!g_trigNearby && !g_trigTarget) return;
+    g_trigNearby = g_trigTarget = false;
+    InfoOff();
+    Log("triggers: info turned OFF: %s", why);
+    Menu_Status("Triggers info: off (%s, see the log)", why);
+}
+
+static const char *TShowText()
+{
+    static const char *const kNames[TF_COUNT] = {"name", "class", "leads-to", "events", "filter", "flags", "state",
+                                                 "shape", "pos", "distance", "all"};
+    static char buf[128];
+    buf[0] = 0;
+    for (int i = 0; i < TF_COUNT; i++)
+        if (g_trigShow[i]) {
+            if (buf[0]) TSTRCAT(buf, " ");
+            TSTRCAT(buf, kNames[i]);
+        }
+    if (!buf[0]) TSTRCPY(buf, "none");
+    return buf;
+}
+
+// ---- geometry ----
+static float Dot3(const float *a, const float *b) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
+
+// distance from p to the volume (0 inside)
+static float DistTo(const TItem &it, const float *p)
+{
+    float d[3] = {p[0] - it.c[0], p[1] - it.c[1], p[2] - it.c[2]};
+    if (it.draw == SH_SPHERE) {
+        float l = sqrtf(Dot3(d, d)) - it.rad;
+        return l > 0 ? l : 0;
+    }
+    float s = 0;
+    for (int i = 0; i < 3; i++) {
+        float q = fabsf(Dot3(d, &it.r[3 * i])) - it.h[i];
+        if (q > 0) s += q * q;
+    }
+    return sqrtf(s);
+}
+
+// the ray o + t*dir enters the volume at t (>= 0; 0 = o is inside); false = missed
+static bool RayHit(const TItem &it, const float *o, const float *dir, float *t, bool *inside)
+{
+    float d[3] = {o[0] - it.c[0], o[1] - it.c[1], o[2] - it.c[2]};
+    if (it.draw == SH_SPHERE) {
+        float b = Dot3(d, dir), c = Dot3(d, d) - it.rad * it.rad, disc = b * b - c;
+        if (c <= 0) { *t = 0; *inside = true; return true; }
+        if (disc < 0 || b > 0) return false;
+        *t = -b - sqrtf(disc);
+        *inside = false;
+        return true;
+    }
+    float t0 = -1e30f, t1 = 1e30f;
+    for (int i = 0; i < 3; i++) {
+        float oo = Dot3(d, &it.r[3 * i]), dd = Dot3(dir, &it.r[3 * i]), h = it.h[i];
+        if (fabsf(dd) < 1e-6f) {
+            if (oo < -h || oo > h) return false;
+            continue;
+        }
+        float a = (-h - oo) / dd, b = (h - oo) / dd;
+        if (a > b) { float x = a; a = b; b = x; }
+        if (a > t0) t0 = a;
+        if (b < t1) t1 = b;
+        if (t0 > t1) return false;
+    }
+    if (t1 < 0) return false;
+    *inside = t0 < 0;
+    *t = t0 < 0 ? 0 : t0;
+    return true;
+}
+
+static float Volume(const TItem &it)
+{
+    return it.draw == SH_SPHERE ? 4.19f * it.rad * it.rad * it.rad : 8.0f * it.h[0] * it.h[1] * it.h[2];
+}
+
+// the point the label stands on: the centre of the top face (the highest point of the volume over its centre)
+static void LabelPoint(const TItem &it, float *p)
+{
+    p[0] = it.c[0];
+    p[1] = it.c[1];
+    if (it.draw == SH_SPHERE) p[2] = it.c[2] + it.rad;
+    else p[2] = it.c[2] + fabsf(it.r[2]) * it.h[0] + fabsf(it.r[5]) * it.h[1] + fabsf(it.r[8]) * it.h[2];
+}
+
+// ---- the fields of one trigger (game thread, inside Trig_Frame: the object is alive) ----
+struct PV { char cls[40], prop[40]; int type; char val[200]; bool ok; };
+static PV s_pv[192];
+static int s_npv;
+static void PVCollect(void *, const char *cls, const char *prop, int type, const char *val)
+{
+    if (s_npv >= 192) return;
+    PV &v = s_pv[s_npv++];
+    TSTRCPY(v.cls, cls);
+    TSTRCPY(v.prop, prop);
+    v.type = type;
+    v.ok = val != NULL;
+    TSTRCPY(v.val, val ? val : "");
+}
+static const PV *PVGet(const char *prop)
+{
+    for (int i = 0; i < s_npv; i++)
+        if (!strcmp(s_pv[i].prop, prop) && s_pv[i].ok) return &s_pv[i];
+    return NULL;
+}
+// a value worth showing: not empty, not "" / [0] / none
+static const char *PVText(const char *prop)
+{
+    const PV *v = PVGet(prop);
+    if (!v || !v->val[0] || !strcmp(v->val, "\"\"") || !strcmp(v->val, "[0]") || !strcmp(v->val, "none")) return NULL;
+    return v->val;
+}
+// "[2] a, b" -> "a, b"
+static const char *ArrItems(const char *v)
+{
+    if (v && v[0] == '[') {
+        const char *p = strchr(v, ']');
+        if (p) return p[1] == ' ' ? p + 2 : p + 1;
+    }
+    return v;
+}
+
+static void Short(char *dst, int size, const char *src, int max)
+{
+    int n = (int)strlen(src);
+    if (n <= max) {
+        strncpy_s(dst, size, src, _TRUNCATE);
+        return;
+    }
+    _snprintf_s(dst, size, _TRUNCATE, "%.*s...", max - 3, src);
+}
+
+// LoadOnEnter / UnloadOnEnter / UnloadOnExit: {region id, layer} -> "Z2_Hub, Z2_Forge (layer 1)"
+static void RegionList(void *obj, const char *prop, char *out, int size)
+{
+    out[0] = 0;
+    DWORD d[64];
+    int per = 0, n = Refl_GetArrayDwords(obj, prop, d, 64, &per);
+    if (n <= 0 || per < 1) return;
+    for (int i = 0; i < n && (i + 1) * per <= 64; i++) {
+        int id = (int)d[i * per], layer = per >= 2 ? (int)d[i * per + 1] : -1;
+        char one[80];
+        const char *nm = id >= 0 ? World_RegionName(id) : NULL;
+        if (id < 0) _snprintf_s(one, sizeof(one), _TRUNCATE, "all regions");
+        else if (nm) _snprintf_s(one, sizeof(one), _TRUNCATE, "%s", nm);
+        else _snprintf_s(one, sizeof(one), _TRUNCATE, "region %d", id);
+        if (layer >= 0) {
+            char l[24];
+            _snprintf_s(l, sizeof(l), _TRUNCATE, " (layer %d)", layer);
+            strncat_s(one, sizeof(one), l, _TRUNCATE);
+        }
+        if (i) strncat_s(out, size, ", ", _TRUNCATE);
+        strncat_s(out, size, one, _TRUNCATE);
+    }
+    if (n * per > 64) strncat_s(out, size, ", ...", _TRUNCATE);
+}
+
+// OnEnterList item "Object:Event" (no ':' -> the event Execute, 0x008C8E8C) -> "Object.Event"
+static void EventItems(const char *v, char *out, int size)
+{
+    out[0] = 0;
+    v = ArrItems(v);
+    if (!v) return;
+    char buf[200];
+    strncpy_s(buf, sizeof(buf), v, _TRUNCATE);
+    char *ctx = NULL;
+    int n = 0;
+    for (char *tok = strtok_s(buf, ",", &ctx); tok; tok = strtok_s(NULL, ",", &ctx)) {
+        while (*tok == ' ') tok++;
+        if (!strcmp(tok, "...")) {
+            strncat_s(out, size, ", ...", _TRUNCATE);
+            break;
+        }
+        char one[96];
+        char *c = strchr(tok, ':');
+        if (c) *c = 0, _snprintf_s(one, sizeof(one), _TRUNCATE, "%s.%s", tok, c + 1);
+        else _snprintf_s(one, sizeof(one), _TRUNCATE, "%s.Execute", tok);
+        if (n++) strncat_s(out, size, ", ", _TRUNCATE);
+        strncat_s(out, size, one, _TRUNCATE);
+    }
+}
+
+// the listeners of a world object (+0x64): script event handlers, components
+static int Listeners(void *obj, char *out, int size)
+{
+    out[0] = 0;
+    int n = 0;
+    BYTE *node = *(BYTE **)((BYTE *)obj + OFS_OBJ_LISTENERS);
+    for (int k = 0; node && k < 16; k++) {
+        void *l = *(void **)(node + 4);
+        if (!l) l = *(void **)node;
+        bool off = node[0xC] != 0;
+        char one[120] = "?";
+        if (l) {
+            void *c = Refl_ClassOf(l);
+            const char *nm = c ? Refl_ObjName(l) : "";
+            if (c) _snprintf_s(one, sizeof(one), _TRUNCATE, "%s%s%s%s%s", Refl_ClassName(c), nm[0] ? " '" : "", nm,
+                               nm[0] ? "'" : "", off ? " (off)" : "");
+            else _snprintf_s(one, sizeof(one), _TRUNCATE, "object %08X", (unsigned)(UINT_PTR)l);
+        }
+        if (n++) strncat_s(out, size, ", ", _TRUNCATE);
+        strncat_s(out, size, one, _TRUNCATE);
+        node = *(BYTE **)(node + 8);
+    }
+    return n;
+}
+
+static const char *const kDestProps[] = {"WorldFile", "Region", "StartPoint", "StartLoadRegion", "Waypoint",
+    "SpawnRegion", "SpawnPoint", "SpawnLoadRegion", "Level", "Room", "PortalCameraWaypoint", "OrientationWaypoint",
+    "Target", "TargetName", "Destination", "TeleportDestination", "TeleportLocation", "HUDText", "MapTileClass"};
+static const char *const kFlagProps[] = {"OneShot", "RequireInWorld", "Exclude", "IncludeGrabbables", "AutoPersist",
+    "Required", "DoAutoSave", "DoStoreData", "DoCommitData", "ActivePortalsOnly", "DeterRuin", "AutoCameraRotate"};
+
+static void ReadInfo(TInfo &ti, void *obj)
+{
+    ti.read = s_frame;
+    TSTRCPY(ti.name, Refl_ObjName(obj));
+    void *cls = Refl_ClassOf(obj);
+    TSTRCPY(ti.cls, cls ? Refl_ClassName(cls) : "");
+    Refl_ClassChain(obj, ti.chain, sizeof(ti.chain), 6);
+    ti.scripted = cls && !TrigFake() && *(UINT_PTR *)cls == PC_VT_CLASS_SCRIPT;
+    ti.trigRegion = Refl_IsKindOf(obj, "TriggerRegion");
+    s_npv = 0;
+    Refl_Visit(obj, PVCollect, NULL);
+    ti.nProps = s_npv;
+    ti.nUnread = 0;
+    for (int i = 0; i < s_npv; i++) ti.nUnread += !s_pv[i].ok;
+    // leads to: destination-like properties, then the regions it loads / unloads
+    ti.dest[0] = 0;
+    for (int i = 0; i < (int)(sizeof(kDestProps) / sizeof(kDestProps[0])); i++) {
+        const char *v = PVText(kDestProps[i]);
+        if (!v) continue;
+        char one[160];
+        TSPRINTF(one, "%s%s %s", ti.dest[0] ? "; " : "", kDestProps[i], v);
+        TSTRCAT(ti.dest, one);
+    }
+    static const char *const kLoads[3][2] = {{"LoadOnEnter", "loads"}, {"UnloadOnEnter", "unloads"},
+                                             {"UnloadOnExit", "unloads on exit"}};
+    for (int i = 0; i < 3; i++) {
+        char list[320];
+        RegionList(obj, kLoads[i][0], list, sizeof(list));
+        if (!list[0]) continue;
+        char one[360];
+        TSPRINTF(one, "%s%s %s", ti.dest[0] ? "; " : "", kLoads[i][1], list);
+        TSTRCAT(ti.dest, one);
+    }
+    if (const char *v = PVText("ConditionalLoads")) {
+        char one[80];
+        TSPRINTF(one, "%sconditional loads %s", ti.dest[0] ? "; " : "", v);
+        TSTRCAT(ti.dest, one);
+    }
+    Short(ti.destShort, sizeof(ti.destShort), ti.dest[0] ? ti.dest : "-", 70);
+    // events: OnEnterList / OnExitList, the listeners, the script class
+    char en[200] = "", ex[200] = "", ls[320] = "";
+    EventItems(PVText("OnEnterList"), en, sizeof(en));
+    EventItems(PVText("OnExitList"), ex, sizeof(ex));
+    int nl = 0;
+    __try {
+        nl = Listeners(obj, ls, sizeof(ls));
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        TSTRCPY(ls, "(unreadable)");
+    }
+    ti.events[0] = 0;
+    if (en[0]) TSPRINTF(ti.events, "onEnter -> %s", en);
+    if (ex[0]) {
+        char one[240];
+        TSPRINTF(one, "%sonExit -> %s", ti.events[0] ? "; " : "", ex);
+        TSTRCAT(ti.events, one);
+    }
+    if (nl) {
+        char one[360];
+        TSPRINTF(one, "%slisteners: %s", ti.events[0] ? "; " : "", ls);
+        TSTRCAT(ti.events, one);
+    }
+    if (ti.scripted) {
+        char one[96];
+        TSPRINTF(one, "%sscript class %s (its onEnter / onExit)", ti.events[0] ? "; " : "", ti.cls);
+        TSTRCAT(ti.events, one);
+    }
+    int ne = 0;
+    for (const char *p = ArrItems(PVText("OnEnterList")); p && *p; p++) ne += *p == ',';
+    if (PVText("OnEnterList")) ne++;
+    int nx = 0;
+    for (const char *p = ArrItems(PVText("OnExitList")); p && *p; p++) nx += *p == ',';
+    if (PVText("OnExitList")) nx++;
+    if (ne || nx || nl) TSPRINTF(ti.eventsShort, "onEnter %d, onExit %d, listeners %d", ne, nx, nl);
+    else TSTRCPY(ti.eventsShort, ti.scripted ? "script class" : "-");
+    // who triggers it
+    const char *fl = PVText("FilterList"), *df = PVText("DefaultFilterList"), *nf = PVText("NameFilter");
+    ti.filter[0] = 0;
+    if (fl) TSPRINTF(ti.filter, "%s", ArrItems(fl));
+    else if (df) TSPRINTF(ti.filter, "%s (default)", ArrItems(df));
+    if (nf) {
+        char one[160];
+        TSPRINTF(one, "%snames: %s", ti.filter[0] ? "; " : "", ArrItems(nf));
+        TSTRCAT(ti.filter, one);
+    }
+    const PV *exc = PVGet("Exclude");
+    if (exc && !strcmp(exc->val, "true")) TSTRCAT(ti.filter, " (exclude: everyone else)");
+    // flags (true ones; OneShot also when false - it says "every time")
+    ti.flags[0] = 0;
+    for (int i = 0; i < (int)(sizeof(kFlagProps) / sizeof(kFlagProps[0])); i++) {
+        const PV *v = PVGet(kFlagProps[i]);
+        if (!v || (strcmp(v->val, "true") && strcmp(kFlagProps[i], "OneShot"))) continue;
+        char one[64];
+        if (!strcmp(kFlagProps[i], "OneShot")) TSPRINTF(one, "%s%s", ti.flags[0] ? ", " : "", strcmp(v->val, "true") ? "every time" : "OneShot");
+        else TSPRINTF(one, "%s%s", ti.flags[0] ? ", " : "", kFlagProps[i]);
+        TSTRCAT(ti.flags, one);
+    }
+    const char *delay = PVText("Delay");
+    if (delay) {
+        char one[48];
+        TSPRINTF(one, "%sdelay %s", ti.flags[0] ? ", " : "", delay);
+        TSTRCAT(ti.flags, one);
+    }
+}
+
+// the live state (every frame): enabled, the player inside, done once, our counts
+static void ReadState(TInfo &ti, const TItem &it, void *obj)
+{
+    ti.enabled = it.enabled != 0;
+    ti.inside = false;
+    if (s_player) {
+        __try {
+            BYTE *body = *(BYTE **)((BYTE *)obj + OFS_OBJ_BODY);
+            ti.inside = body && PlayerIndex(body, s_player) >= 0;
+        } __except (EXCEPTION_EXECUTE_HANDLER) {
+            ti.inside = false;
+        }
+    }
+    char done[64] = "";
+    if (ti.trigRegion) {
+        BYTE de = ((BYTE *)obj)[OFS_TR_DONE_ENTER], dx = ((BYTE *)obj)[OFS_TR_DONE_EXIT];
+        if (de || dx) TSPRINTF(done, "; fired: %s%s%s", de ? "onEnter" : "", de && dx ? " + " : "", dx ? "onExit" : "");
+    }
+    DetStat *d = DetStatOf(obj, false);
+    char cnt[96] = "";
+    if (d && (d->enter || d->exit)) {
+        DWORD now = GetTickCount();
+        if (d->lastEnter) TSPRINTF(cnt, "; in %d / out %d, entered %.1f s ago", d->enter, d->exit,
+                                   (now - d->lastEnter) / 1000.0f);
+        else TSPRINTF(cnt, "; in %d / out %d", d->enter, d->exit);
+    }
+    TSPRINTF(ti.state, "%s%s%s%s", ti.enabled ? "enabled" : "DISABLED", ti.inside ? ", player INSIDE" : ", player outside",
+             cnt, done);
+}
+
+static TInfo *InfoFor(void *obj)
+{
+    TInfo *best = NULL;
+    for (int i = 0; i < kInfoSlots; i++) {
+        if (s_info[i].obj == obj) return &s_info[i];
+        if (s_info[i].used == s_frame) continue;  // in use this frame
+        if (!best || s_info[i].used < best->used) best = &s_info[i];
+    }
+    if (!best) return NULL;
+    memset(best, 0, sizeof(*best));
+    best->obj = obj;
+    best->read = -1000;
+    return best;
+}
+
+static TInfo *Use(const TItem &it)
+{
+    TInfo *ti = InfoFor(it.obj);
+    if (!ti) return NULL;
+    ti->used = s_frame;
+    if (s_frame - ti->read >= kRefreshFrames) ReadInfo(*ti, it.obj);
+    ReadState(*ti, it, it.obj);
+    return ti;
+}
+
+// every property of the target as lines (panel + log)
+static void ReadAll(void *obj)
+{
+    s_tAllRead = s_frame;
+    s_npv = 0;
+    Refl_Visit(obj, PVCollect, NULL);
+    s_tAllTotal = s_npv;
+    s_tAllN = 0;
+    const char *last = "";
+    for (int i = 0; i < s_npv && s_tAllN < kAllLines; i++) {
+        if (strcmp(last, s_pv[i].cls)) {
+            TSPRINTF(s_tAll[s_tAllN], "-- %s --", s_pv[i].cls);
+            s_tAllN++;
+            last = s_pv[i].cls;
+            if (s_tAllN >= kAllLines) break;
+        }
+        if (s_pv[i].ok) TSPRINTF(s_tAll[s_tAllN], "%s = %s", s_pv[i].prop, s_pv[i].val);
+        else TSPRINTF(s_tAll[s_tAllN], "%s = (not read, type %d)", s_pv[i].prop, s_pv[i].type);
+        s_tAllN++;
+    }
+}
+
+// the trigger the camera looks at: the nearest volume the view ray enters; else (the camera inside volumes) the
+// smallest one around the camera; else the one nearest to the screen centre within 8 deg. The current one stays
+// while the ray still enters it and the best is not 15 % nearer (no flicker).
+static int PickTarget(const float *o, const float *dir)
+{
+    int bestHit = -1, bestIn = -1, bestAim = -1, cur = -1;
+    float tHit = 1e30f, vIn = 1e30f, aAim = 8.0f, tCur = 0;
+    bool curHit = false;
+    for (int i = 0; i < s_numItems; i++) {
+        const TItem &it = s_items[i];
+        if (!it.enabled && !g_trigShowDisabled) continue;
+        float t;
+        bool inside;
+        if (RayHit(it, o, dir, &t, &inside)) {
+            if (!inside && t < tHit) tHit = t, bestHit = i;
+            if (inside && Volume(it) < vIn) vIn = Volume(it), bestIn = i;
+            if (it.obj == s_tObj) cur = i, curHit = !inside, tCur = t;
+        } else if (it.obj == s_tObj) {
+            cur = i;
+        }
+        float d[3] = {it.c[0] - o[0], it.c[1] - o[1], it.c[2] - o[2]}, l = sqrtf(Dot3(d, d));
+        if (l > 1) {
+            float a = acosf(fmaxf(-1.0f, fminf(1.0f, Dot3(d, dir) / l))) * 57.29578f;
+            if (a < aAim) aAim = a, bestAim = i;
+        }
+    }
+    if (bestHit >= 0) {
+        if (cur >= 0 && curHit && tHit >= tCur * 0.85f) {
+            TSPRINTF(s_tHow, "ray enters it at %.1f m", tCur / kTUnitsPerM);
+            s_tDist = tCur;
+            return cur;
+        }
+        TSPRINTF(s_tHow, "ray enters it at %.1f m", tHit / kTUnitsPerM);
+        s_tDist = tHit;
+        return bestHit;
+    }
+    if (bestIn >= 0) {
+        TSTRCPY(s_tHow, "the camera is inside");
+        s_tDist = 0;
+        return bestIn;
+    }
+    if (bestAim >= 0) {
+        TSPRINTF(s_tHow, "nearest to the centre (%.1f deg)", aAim);
+        float d[3] = {s_items[bestAim].c[0] - o[0], s_items[bestAim].c[1] - o[1], s_items[bestAim].c[2] - o[2]};
+        s_tDist = sqrtf(Dot3(d, d));
+        return bestAim;
+    }
+    s_tHow[0] = 0;
+    return -1;
+}
+
+static void LogTarget(const TItem &it, const TInfo &ti)
+{
+    if (!LogBudget(&s_tLogBudget, 40)) return;
+    Log("triggers: target -> '%s' %s (%s) at (%.0f %.0f %.0f) shape %d | %s", ti.name, ti.chain, s_tHow, it.c[0],
+        it.c[1], it.c[2], it.shape, ti.state);
+    Log("triggers:   leads to: %s | events: %s | who: %s | flags: %s", ti.dest[0] ? ti.dest : "-",
+        ti.events[0] ? ti.events : "-", ti.filter[0] ? ti.filter : "-", ti.flags[0] ? ti.flags : "-");
+    for (int i = 0; i < s_tAllN; i++) Log("triggers:   %s", s_tAll[i]);
+    if (s_tAllTotal > s_tAllN) Log("triggers:   ... %d more properties", s_tAllTotal - s_tAllN);
+}
+
+// "on": which classes the triggers have and how many properties were read (for the in-game check)
+static void LogClasses()
+{
+    struct { char cls[48]; int n, props, unread; char sample[64]; } c[32];
+    int nc = 0, nobj = 0;
+    for (int i = 0; i < s_numItems && nobj < 3000; i++, nobj++) {
+        void *cl = Refl_ClassOf(s_items[i].obj);
+        const char *nm = cl ? Refl_ClassName(cl) : "(no class)";
+        int k = 0;
+        while (k < nc && strcmp(c[k].cls, nm)) k++;
+        if (k == nc) {
+            if (nc == 32) continue;
+            TSTRCPY(c[k].cls, nm);
+            c[k].n = 0;
+            s_npv = 0;
+            Refl_Visit(s_items[i].obj, PVCollect, NULL);
+            c[k].props = s_npv;
+            c[k].unread = 0;
+            for (int q = 0; q < s_npv; q++) c[k].unread += !s_pv[q].ok;
+            TSTRCPY(c[k].sample, Refl_ObjName(s_items[i].obj));
+            nc++;
+        }
+        c[k].n++;
+    }
+    Log("triggers: info ON (nearby %s, target %s, range %s, display %s): %d triggers, %d classes:",
+        g_trigNearby ? "on" : "off", g_trigTarget ? "on" : "off",
+        kTRangeM[g_trigRange] ? "limited" : "unlimited", TShowText(), s_numItems, nc);
+    for (int k = 0; k < nc; k++)
+        Log("triggers:   class %s: %d objects, %d properties (%d not read), e.g. '%s'", c[k].cls, c[k].n, c[k].props,
+            c[k].unread, c[k].sample);
+}
+
+static void InfoInner()
+{
+    if (s_infoThrow) {
+        s_infoThrow = false;
+        *(volatile int *)0 = 2;
+    }
+    // the player: the "inside" check; the reference point of nearby: the player, or the camera in a free flight
+    s_player = NULL;
+    s_refOk = s_camOk = false;
+    if (TrigFake()) {
+        s_player = s_fakePlayer;
+    } else {
+        void *game = NULL, *actor = NULL;
+        if (Game_GetGame(&game) && Game_GetActor(game, &actor)) s_player = actor;
+    }
+    bool viewOk = s_view.ok && s_frame - s_view.frame <= 3;
+    if (viewOk) {
+        for (int i = 0; i < 3; i++) s_cam[i] = s_view.cam[12 + i];
+        s_camOk = true;
+    }
+    s_refCam = g_flying && !Flight_Attached();
+    if (s_refCam && s_camOk) {
+        memcpy(s_ref, s_cam, sizeof(s_ref));
+        s_refOk = true;
+    } else if (s_player && !TrigFake()) {
+        GameVec p;
+        if (Game_ActorGetPos(s_player, &p)) s_ref[0] = p.x, s_ref[1] = p.y, s_ref[2] = p.z, s_refOk = true;
+    }
+    if (!s_refOk && s_camOk) {  // no player (test, loading): the camera
+        memcpy(s_ref, s_cam, sizeof(s_ref));
+        s_refOk = true;
+        s_refCam = true;
+    }
+    World_Refresh();  // region names for LoadOnEnter (twice a second; the map log too)
+    if (!s_infoWasOn) {
+        s_infoWasOn = true;
+        s_infoMs = s_infoMax = 0;
+        s_infoN = 0;
+        LogClasses();
+    }
+    // nearby: the nearest kTMaxLabels within the range (distance to the volume)
+    s_numLab = s_inRange = 0;
+    if (g_trigNearby && s_refOk) {
+        float range = kTRangeM[g_trigRange] * kTUnitsPerM;
+        for (int i = 0; i < s_numItems; i++) {
+            const TItem &it = s_items[i];
+            if (!it.enabled && !g_trigShowDisabled) continue;
+            float d = DistTo(it, s_ref);
+            if (range > 0 && d > range) continue;
+            s_inRange++;
+            int k = s_numLab < kTMaxLabels ? s_numLab++ : kTMaxLabels;
+            if (k == kTMaxLabels) {
+                if (d >= s_lab[kTMaxLabels - 1].dist) continue;
+                k = kTMaxLabels - 1;
+            }
+            while (k > 0 && s_lab[k - 1].dist > d) s_lab[k] = s_lab[k - 1], k--;
+            s_lab[k].item = i;
+            s_lab[k].dist = d;
+            s_lab[k].info = NULL;
+        }
+    }
+    // target
+    int ti = -1;
+    if (g_trigTarget && viewOk) {
+        float dir[3] = {-s_view.cam[8], -s_view.cam[9], -s_view.cam[10]}, l = sqrtf(Dot3(dir, dir));
+        if (l > 0) {
+            for (int i = 0; i < 3; i++) dir[i] /= l;
+            ti = PickTarget(s_cam, dir);
+        }
+    }
+    void *prev = s_tObj;
+    s_tItem = ti;
+    s_tObj = ti >= 0 ? s_items[ti].obj : NULL;
+    s_tInfo = ti >= 0 ? Use(s_items[ti]) : NULL;
+    if (ti >= 0 && s_tInfo) {
+        if (s_tObj != prev || s_frame - s_tAllRead >= kRefreshFrames) ReadAll(s_tObj);
+        if (s_tObj != prev) LogTarget(s_items[ti], *s_tInfo);
+    } else if (prev && LogBudget(&s_tLogBudget, 40)) {
+        Log("triggers: target -> none");
+    }
+    for (int k = 0; k < s_numLab; k++) s_lab[k].info = Use(s_items[s_lab[k].item]);
+}
+
+static void InfoFrame()
+{
+    double t0 = NowMs();
+    __try {
+        InfoInner();
+    } __except (CatchTr("trigger info", GetExceptionInformation())) {
+        s_numLab = 0;
+        s_tItem = -1;
+        s_tInfo = NULL;
+        s_tObj = NULL;
+        InfoTurnOff("exception while reading the info");
+        return;
+    }
+    double dt = NowMs() - t0;
+    s_infoMs += dt;
+    s_infoMax = dt > s_infoMax ? dt : s_infoMax;
+    s_infoN++;
+    if (s_infoN >= 300) {  // ~5 s
+        if (LogBudget(&s_infoStatsBudget, 200))
+            Log("triggers: info: %d in range, %d labels (%d drawn, %d skipped), target '%s' | read %.3f ms avg (max %.3f)",
+                s_inRange, s_numLab, s_labDrawn, s_labSkipped, s_tInfo ? s_tInfo->name : "-", s_infoMs / s_infoN,
+                s_infoMax);
+        s_infoMs = s_infoMax = 0;
+        s_infoN = 0;
+    }
+}
+
+// ---- drawing (overlay frame, text only) ----
+struct TLine { char s[176]; ImU32 col; };
+static const ImU32 kTWhite = IM_COL32(255, 255, 255, 255), kTDim = IM_COL32(200, 200, 200, 255),
+                   kTOff = IM_COL32(160, 160, 160, 255), kTDest = IM_COL32(255, 210, 120, 255),
+                   kTIn = IM_COL32(120, 255, 120, 255);
+
+static int LabelLines(const TItem &it, const TInfo &ti, TLine *l, int max)
+{
+    int n = 0;
+    const bool *sh = g_trigShow;
+    ImU32 base = ti.enabled ? kTWhite : kTOff;
+    if (sh[TF_NAME] && n < max) {
+        TSPRINTF(l[n].s, "%s%s%s", ti.name[0] ? ti.name : "(no name)", ti.enabled ? "" : " [off]",
+                 ti.inside ? " [inside]" : "");
+        l[n++].col = ti.inside ? kTIn : base;
+    }
+    if (sh[TF_CLASS] && n < max) TSPRINTF(l[n].s, "%s", ti.cls[0] ? ti.cls : "detector"), l[n++].col = kTDim;
+    if (sh[TF_DEST] && ti.dest[0] && n < max) TSPRINTF(l[n].s, "-> %s", ti.destShort), l[n++].col = kTDest;
+    // labels leave out the lines with nothing to say (the panel shows them as "-")
+    if (sh[TF_EVENTS] && strcmp(ti.eventsShort, "-") && n < max) TSPRINTF(l[n].s, "events: %s", ti.eventsShort), l[n++].col = base;
+    if (sh[TF_FILTER] && ti.filter[0] && n < max) {
+        char s[96];
+        Short(s, sizeof(s), ti.filter[0] ? ti.filter : "-", 60);
+        TSPRINTF(l[n].s, "who: %s", s);
+        l[n++].col = base;
+    }
+    if (sh[TF_FLAGS] && ti.flags[0] && n < max) {
+        char s[96];
+        Short(s, sizeof(s), ti.flags[0] ? ti.flags : "-", 60);
+        TSPRINTF(l[n].s, "flags: %s", s);
+        l[n++].col = base;
+    }
+    if (sh[TF_STATE] && n < max) {
+        char s[96];
+        Short(s, sizeof(s), ti.state, 70);
+        TSPRINTF(l[n].s, "%s", s);
+        l[n++].col = ti.inside ? kTIn : base;
+    }
+    if (sh[TF_SHAPE] && n < max) {
+        if (it.draw == SH_SPHERE) TSPRINTF(l[n].s, "sphere r %.0f", it.rad);
+        else TSPRINTF(l[n].s, "%s %.0f x %.0f x %.0f", it.shape == 1 ? "box (rotated)" : it.shape == 3 ? "capsule" : "box",
+                      it.h[0] * 2, it.h[1] * 2, it.h[2] * 2);
+        l[n++].col = kTDim;
+    }
+    if (sh[TF_POS] && n < max) TSPRINTF(l[n].s, "pos (%.0f %.0f %.0f)", it.c[0], it.c[1], it.c[2]), l[n++].col = kTDim;
+    return n;
+}
+
+static bool TProject(const float *p, float *sx, float *sy)
+{
+    float c[4];
+    ToClip(p, c);
+    if (c[2] < 0 || c[3] < 1.0f) return false;
+    float iw = 1.0f / c[3];
+    *sx = (c[0] * iw * 0.5f + 0.5f) * s_W;
+    *sy = (0.5f - c[1] * iw * 0.5f) * s_H;
+    return _finite(*sx) && _finite(*sy) && fabsf(*sx) < 1e5f && fabsf(*sy) < 1e5f;
+}
+
+struct TRect { float x0, y0, x1, y1; };
+static void DrawLabels(ImDrawList *dl)
+{
+    ImFont *font = ImGui::GetFont();
+    float fsz = ImGui::GetFontSize() * 0.85f, lh = fsz + 1.0f;
+    TRect placed[kTMaxLabels];
+    int np = 0;
+    s_labDrawn = s_labSkipped = 0;
+    for (int k = 0; k < s_numLab; k++) {
+        if (!s_lab[k].info) continue;
+        const TItem &it = s_items[s_lab[k].item];
+        float p[3], sx, sy;
+        LabelPoint(it, p);
+        if (!TProject(p, &sx, &sy)) continue;
+        TLine lines[10];
+        int n = LabelLines(it, *s_lab[k].info, lines, 10);
+        if (!n) continue;
+        float w = 0;
+        for (int i = 0; i < n; i++) w = fmaxf(w, font->CalcTextSizeA(fsz, FLT_MAX, 0, lines[i].s).x);
+        TRect r = {sx - w * 0.5f - 3, sy - n * lh - 4, sx + w * 0.5f + 3, sy};
+        bool ok = false;
+        for (int tries = 0; tries < 4 && !ok; tries++) {  // nearest first; one that hits a placed label moves up
+            ok = true;
+            for (int q = 0; q < np; q++) {
+                const TRect &o = placed[q];
+                if (r.x0 < o.x1 && r.x1 > o.x0 && r.y0 < o.y1 && r.y1 > o.y0) {
+                    float hgt = r.y1 - r.y0;
+                    r.y1 = o.y0 - 2;
+                    r.y0 = r.y1 - hgt;
+                    ok = false;
+                    break;
+                }
+            }
+        }
+        if (!ok || r.y0 < 0 || r.x1 < 0 || r.x0 > s_W || r.y1 > s_H) {
+            s_labSkipped++;
+            continue;
+        }
+        placed[np++] = r;
+        bool isT = g_trigTarget && it.obj == s_tObj;
+        dl->AddRectFilled(ImVec2(r.x0, r.y0), ImVec2(r.x1, r.y1), IM_COL32(0, 0, 0, 115), 2.0f);
+        dl->AddRect(ImVec2(r.x0, r.y0), ImVec2(r.x1, r.y1), isT ? kTgtCol : (it.trig ? IM_COL32(255, 0, 255, 120) :
+                    IM_COL32(0, 255, 255, 110)), 2.0f, 0, isT ? 1.5f : 1.0f);
+        for (int i = 0; i < n; i++) {
+            float tw = font->CalcTextSizeA(fsz, FLT_MAX, 0, lines[i].s).x;
+            dl->AddText(font, fsz, ImVec2(floorf(sx - tw * 0.5f), floorf(r.y0 + 2 + i * lh)), lines[i].col, lines[i].s);
+        }
+        s_labDrawn++;
+    }
+}
+
+// the target: its shape in yellow (also without Show triggers) + corners around it on the screen
+static void DrawHighlight(ImDrawList *dl, const TItem &it)
+{
+    s_emit = EM_IMGUI;
+    s_dl = dl;
+    s_zA = s_view.proj[10];
+    s_zB = s_view.proj[14];
+    BuildPlanes();
+    DrawItem(it, 0, kTgtCol, true);
+    float x0 = 1e9f, y0 = 1e9f, x1 = -1e9f, y1 = -1e9f;
+    int ok = 0;
+    for (int k = 0; k < 8; k++) {
+        float p[3], sx, sy;
+        float e0 = (k & 1) ? 1.0f : -1.0f, e1 = (k & 2) ? 1.0f : -1.0f, e2 = (k & 4) ? 1.0f : -1.0f;
+        if (it.draw == SH_SPHERE) {
+            p[0] = it.c[0] + e0 * it.rad, p[1] = it.c[1] + e1 * it.rad, p[2] = it.c[2] + e2 * it.rad;
+        } else {
+            for (int i = 0; i < 3; i++)
+                p[i] = it.c[i] + e0 * it.h[0] * it.r[i] + e1 * it.h[1] * it.r[3 + i] + e2 * it.h[2] * it.r[6 + i];
+        }
+        if (!TProject(p, &sx, &sy)) continue;
+        ok++;
+        x0 = fminf(x0, sx), y0 = fminf(y0, sy), x1 = fmaxf(x1, sx), y1 = fmaxf(y1, sy);
+    }
+    if (ok < 8) return;  // partly behind the camera / the camera inside: the yellow shape is enough
+    x0 = fmaxf(x0 - 6, 2), y0 = fmaxf(y0 - 6, 2), x1 = fminf(x1 + 6, s_W - 2), y1 = fminf(y1 + 6, s_H - 2);
+    float k = fminf(16.0f, fminf((x1 - x0) * 0.3f, (y1 - y0) * 0.3f));
+    dl->AddLine(ImVec2(x0, y0), ImVec2(x0 + k, y0), kTgtCol, 2);
+    dl->AddLine(ImVec2(x0, y0), ImVec2(x0, y0 + k), kTgtCol, 2);
+    dl->AddLine(ImVec2(x1, y0), ImVec2(x1 - k, y0), kTgtCol, 2);
+    dl->AddLine(ImVec2(x1, y0), ImVec2(x1, y0 + k), kTgtCol, 2);
+    dl->AddLine(ImVec2(x0, y1), ImVec2(x0 + k, y1), kTgtCol, 2);
+    dl->AddLine(ImVec2(x0, y1), ImVec2(x0, y1 - k), kTgtCol, 2);
+    dl->AddLine(ImVec2(x1, y1), ImVec2(x1 - k, y1), kTgtCol, 2);
+    dl->AddLine(ImVec2(x1, y1), ImVec2(x1, y1 - k), kTgtCol, 2);
+}
+
+static const ImGuiWindowFlags kTPanel = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize |
+                                        ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoCollapse |
+                                        ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoInputs |
+                                        ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav |
+                                        ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_AlwaysAutoResize;
+
+static void PanelField(const char *label, const char *text, const ImVec4 &col)
+{
+    ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.30f, 1.0f), "%s", label);
+    ImGui::SameLine();
+    ImGui::TextColored(col, "%s", text && text[0] ? text : "-");
+}
+
+// left side from 30 % of the height (below the open menu): off the centre, away from the Monsters panel (right)
+// and the status lines (bottom left)
+static void DrawPanel()
+{
+    float fs = ImGui::GetFontSize();
+    float y = s_H * 0.30f, mb = Menu_PanelBottom();
+    if (g_menuOpen && mb > 0) y = fmaxf(y, mb + fs * 0.5f);
+    float maxH = s_H - y - fs * 5.5f;
+    if (maxH < fs * 5) return;  // the open menu fills the left side: back when it closes (the highlight stays)
+    ImGui::SetNextWindowPos(ImVec2(fs * 1.5f, y), ImGuiCond_Always, ImVec2(0.0f, 0.0f));
+    ImGui::SetNextWindowBgAlpha(0.70f);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2(s_W * 0.40f, maxH));
+    ImGui::Begin("##dbgtrigtarget", NULL, kTPanel);
+    ImGui::SetWindowFontScale(0.85f);
+    float wrap = fmaxf(fs * 14.0f, s_W * 0.38f - ImGui::GetStyle().WindowPadding.x * 2);
+    ImGui::PushTextWrapPos(wrap);
+    ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.30f, 1.0f), "info: target (Triggers)");
+    if (s_tItem < 0 || !s_tInfo) {
+        ImGui::TextDisabled("no trigger in the centre of the screen");
+        ImGui::PopTextWrapPos();
+        ImGui::End();
+        return;
+    }
+    const TItem &it = s_items[s_tItem];
+    const TInfo &ti = *s_tInfo;
+    const bool *sh = g_trigShow;
+    bool any = false;
+    for (int i = 0; i < TF_COUNT; i++) any |= sh[i];
+    if (!any) {
+        ImGui::TextDisabled("all lines are off (Triggers > Display)");
+        ImGui::PopTextWrapPos();
+        ImGui::End();
+        return;
+    }
+    ImVec4 white(1, 1, 1, 1), dim(0.75f, 0.75f, 0.75f, 1), dest(1.0f, 0.82f, 0.47f, 1), in(0.47f, 1, 0.47f, 1);
+    if (sh[TF_NAME]) ImGui::Text("%s%s", ti.name[0] ? ti.name : "(no name)", ti.enabled ? "" : "  [off]");
+    if (sh[TF_CLASS]) PanelField("class", ti.chain, dim);
+    if (sh[TF_DEST]) PanelField("leads to", ti.dest, dest);
+    if (sh[TF_EVENTS]) PanelField("events", ti.events, white);
+    if (sh[TF_FILTER]) PanelField("who", ti.filter, white);
+    if (sh[TF_FLAGS]) PanelField("flags", ti.flags, white);
+    if (sh[TF_STATE]) PanelField("state", ti.state, ti.inside ? in : white);
+    if (sh[TF_SHAPE]) {
+        char s[160];
+        static const char *const kShape[] = {"box", "rotated box", "sphere", "capsule (drawn as a box)", "box (shape ?)"};
+        if (it.draw == SH_SPHERE) TSPRINTF(s, "%s, radius %.0f (%.1f m)", kShape[it.shape], it.rad, it.rad / kTUnitsPerM);
+        else TSPRINTF(s, "%s %.0f x %.0f x %.0f (%.1f x %.1f x %.1f m)", kShape[it.shape], it.h[0] * 2, it.h[1] * 2,
+                      it.h[2] * 2, it.h[0] * 0.02f, it.h[1] * 0.02f, it.h[2] * 0.02f);
+        PanelField("shape", s, dim);
+    }
+    if (sh[TF_POS]) {
+        char s[80];
+        TSPRINTF(s, "(%.1f %.1f %.1f)", it.c[0], it.c[1], it.c[2]);
+        PanelField("pos", s, dim);
+    }
+    if (sh[TF_DIST]) {
+        char s[160];
+        float dp = s_refOk && !s_refCam ? DistTo(it, s_ref) : -1;
+        if (dp >= 0) TSPRINTF(s, "player %.1f m%s, camera %.1f m (%s)", dp / kTUnitsPerM, dp == 0 ? " (inside)" : "",
+                              s_tDist / kTUnitsPerM, s_tHow);
+        else TSPRINTF(s, "camera %.1f m (%s)", s_tDist / kTUnitsPerM, s_tHow);
+        PanelField("distance", s, dim);
+    }
+    if (sh[TF_ALL]) {
+        ImGui::Separator();
+        ImGui::TextDisabled("all properties (%d, %d not read):", ti.nProps, ti.nUnread);
+        // as many as fit in the panel; the rest is in the log (target change)
+        float room = maxH - ImGui::GetCursorPosY() - fs * 2.0f;
+        int fit = (int)(room / ImGui::GetTextLineHeightWithSpacing());
+        int shown = 0;
+        for (int i = 0; i < s_tAllN && shown < fit; i++, shown++) {
+            if (s_tAll[i][0] == '-') ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.30f, 0.8f), "%s", s_tAll[i]);
+            else ImGui::TextDisabled("%s", s_tAll[i]);
+        }
+        if (shown < s_tAllN || s_tAllTotal > s_tAllN)
+            ImGui::TextDisabled("... %d more lines (dbgmenu.log, when the target changes)", s_tAllN - shown + (s_tAllTotal > s_tAllN ? s_tAllTotal - s_tAllN : 0));
+    }
+    ImGui::PopTextWrapPos();
+    ImGui::End();
+}
+
+void Trig_InfoDraw2D()
+{
+    if (!g_trigNearby && !g_trigTarget) return;
+    if (!ViewFresh()) return;  // loading / menus without 3D
+    ImGuiIO &io = ImGui::GetIO();
+    s_W = io.DisplaySize.x;
+    s_H = io.DisplaySize.y;
+    __try {
+        ImDrawList *dl = ImGui::GetBackgroundDrawList();
+        if (g_trigTarget && s_tItem >= 0 && s_tItem < s_numItems) DrawHighlight(dl, s_items[s_tItem]);
+        if (g_trigNearby) DrawLabels(dl);
+        if (g_trigTarget) DrawPanel();
+    } __except (DrawFilter("trigger info drawing", GetExceptionInformation())) {
+        InfoTurnOff("exception while drawing the info");
+    }
+}
+
+static void InfoStatus()
+{
+    if (!g_trigNearby && !g_trigTarget) return;
+    ImGui::SameLine();
+    char range[24];
+    if (kTRangeM[g_trigRange]) TSPRINTF(range, "%.0f m", kTRangeM[g_trigRange]);
+    else TSTRCPY(range, "unlimited");
+    if (g_trigNearby) ImGui::TextDisabled("| labels %d / %d in %s%s", s_labDrawn, s_inRange, range,
+                                          s_refCam ? " of the camera" : "");
+    if (g_trigTarget) {
+        ImGui::SameLine();
+        ImGui::TextDisabled("| target: %s", s_tInfo ? (s_tInfo->name[0] ? s_tInfo->name : "(no name)") : "-");
+    }
+}
+
 // ======================= offline test controls =======================
 // 8 = projection self-check, 9 = level unloaded (empty list), 10 = broken list (bad node + cycle), 11 = normal,
 // 13 = exception in the next collection, 14 = 8000 objects (timing), 15 = task 09 detector enter/exit log
+// task 13: 29 / 30 the player enters / leaves the door trigger (body list + the task 09 hooks), 31 exception
+static void TestDoor(bool enter)
+{
+    static BYTE wrap[16], col[0x40];
+    *(void **)(wrap + 0xC) = s_fakePlayer;
+    *(void **)(col + 0x3C) = wrap;
+    int &n = *(int *)(s_fBody + 0x2C);
+    if (enter) {
+        Trig_OnDetectorAdd(s_fBody, col);  // the hook looks first, then the game adds it
+        s_fBodyObjs[0] = s_fakePlayer;
+        s_fBodyCounts[0] = 1;
+        n = 1;
+        s_fDoneEnter = 1;
+    } else {
+        Trig_OnDetectorRemove(s_fBody, s_fakePlayer);
+        n = 0;
+    }
+    Log("test: the player %s the door trigger", enter ? "enters" : "leaves");
+}
+
 void Trig_TestControl(int cmd)
 {
     if (!TrigFake()) return;
+    if (cmd == 29 || cmd == 30) {
+        TestDoor(cmd == 29);
+        return;
+    }
+    if (cmd == 31) {
+        s_infoThrow = true;
+        Log("test: forcing an exception in the next trigger info reading");
+        return;
+    }
     if (cmd == 15) {
         TestDetectorEvents();
         return;

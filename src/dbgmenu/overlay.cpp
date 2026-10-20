@@ -166,6 +166,7 @@ static void FrameInner(IDirect3DDevice9 *dev)
         ImGui::GetIO().DisplaySize = ImVec2((float)d.Width, (float)d.Height);  // back buffer, not client rect
         ImGui::NewFrame();
         Trig_Draw2D();  // background draw list: under the menu panels
+        Trig_InfoDraw2D();  // task 13: trigger labels (background), target highlight and panel
         Trig_DrawStatus();
         if (g_debugOn) Mon_Draw2D();  // task 11: monster labels (background), target panel, summary line
         Menu_Draw();

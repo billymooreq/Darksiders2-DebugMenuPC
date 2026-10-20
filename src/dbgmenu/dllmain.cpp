@@ -175,7 +175,8 @@ extern "C" LPCVOID WINAPI Proxy_GetdfDIJoystick(void) { return p_GetdfDIJoystick
 
 // Offline test harness only (does nothing in the game): 1..4, 7 fake game state, 5 = exception in the flight frame,
 // 6 = log the simulated cursor state, 8..11, 13 triggers (projection check, empty / broken / normal fake list, exception),
-// 16 = read dbgmenu_keys.ini again (task 10), 17..26 monsters (task 11, monsters.cpp Mon_TestControl).
+// 16 = read dbgmenu_keys.ini again (task 10), 17..26 monsters (task 11, monsters.cpp Mon_TestControl),
+// 27 / 28 = the fake world changes the map / back, 29..31 trigger info (task 13).
 extern "C" void __cdecl DbgMenuTest(int cmd)
 {
     if (!g_testMode || g_gameMatch) return;
@@ -184,5 +185,7 @@ extern "C" void __cdecl DbgMenuTest(int cmd)
     else if (cmd == 6) Cursor_TestLog("check");
     else if ((cmd >= 8 && cmd <= 11) || cmd == 13 || cmd == 14 || cmd == 15) Trig_TestControl(cmd);
     else if (cmd >= 17 && cmd <= 26) Mon_TestControl(cmd);
+    else if (cmd == 27 || cmd == 28) World_TestControl(cmd);  // task 13: map change in the fake world
+    else if (cmd >= 29 && cmd <= 31) Trig_TestControl(cmd);   // task 13: trigger info
     else Game_TestControl(cmd);
 }

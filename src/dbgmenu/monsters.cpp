@@ -33,7 +33,8 @@
 
 bool g_monNearby, g_monTarget, g_monDamage, g_monFreeze;
 bool g_monDamageNoHooks;
-bool g_monShow[MF_COUNT] = {true, false, true};  // task 12: Monsters > Display (MF_NAME, MF_HP on)
+// task 12: Monsters > Display (MF_NAME, MF_HP on); task 13: + MF_HITS on (shown only while damage info is on)
+bool g_monShow[MF_COUNT] = {true, false, true, false, false, false, false, false, false, false, false, true};
 int g_monRange = 2;      // kRangeM index (30 m)
 int g_monWho;            // MW_*
 
@@ -1435,7 +1436,7 @@ static void DrawTargetPanel(int ti)
 static void DrawSummary(bool full)
 {
     float fs = ImGui::GetFontSize();
-    float bottom = s_H - fs * 3.6f - (g_showTriggers ? fs * 1.45f : 0.0f);
+    float bottom = s_H - fs * 3.6f - (Trig_StatusShown() ? fs * 1.45f : 0.0f);
     ImGui::SetNextWindowPos(ImVec2(fs * 1.5f, bottom), ImGuiCond_Always, ImVec2(0.0f, 1.0f));
     ImGui::SetNextWindowBgAlpha(0.55f);
     ImGui::Begin("##dbgmonsum", NULL, kPanel);

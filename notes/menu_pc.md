@@ -1,4 +1,4 @@
-# Дебаг-меню (DLL v0.7–v0.11, задачи 08–12): устройство и как расширять
+# Дебаг-меню (DLL v0.7–v0.12, задачи 08–13): устройство и как расширять
 
 Код — `src\dbgmenu\menu.cpp` (реестр, клавиши меню, отрисовка, панель showCameraPosition), `keys.cpp` (с v0.9: F10, назначаемые клавиши, `dbgmenu_keys.ini`). Горячие клавиши ловит WndProc в `input.cpp` (`Keys_HotkeyNow` → `RunHotkey`), меню получает клавиши из очереди (`Input_PopKey` → `Menu_HandleKey`, поток рендера = поток игры): обычный vk — навигация, `KQ_ACTION|действие` — горячая клавиша уже выполнена (только лог), `KQ_CAPTURE|vk` — клавиша для раздела Keys.
 
@@ -12,10 +12,16 @@ Main
     attach distance           < 200 >            g_attachDist 100…600 шаг 50, формат %.0f (поле fmt)
     hover after teleport      [on]               g_hoverAfterTeleport (по умолч. on)
     hover jump                < game | direct >  g_hoverJumpMode (по умолч. game)
-> Triggers             3 >
+> Triggers             7 >   (v0.12, задача 13: +4 строки info, triggers_pc.md §7)
     Show triggers (shortcut F3) [off]            g_showTriggers (по умолч. off)
     depth                     < through walls | depth >  g_trigDepthMode (по умолч. through walls)
-    show disabled             [on]               g_trigShowDisabled (по умолч. on)
+    show disabled             [on]               g_trigShowDisabled (по умолч. on; v0.12 — и для подписей / цели)
+    info: nearby              [off]              g_trigNearby (подписи у триггеров рядом с героем / камерой в полёте)
+    info: target (shortcut F6) [off]             g_trigTarget (панель слева + жёлтый контур цели)
+    nearby range              < 10 m … 30 m … 150 m | unlimited >  g_trigRange (по умолч. 30 m)
+    Display              13 >   ПАПКА "Triggers/Display", g_trigShow[TF_*]
+        name [on] · class [on] · leads to [on] · events / scripts · who triggers it · flags · state ·
+        shape and size · position · distance (target only) · all properties (target only) · all on · all off
 > Monsters             7 >   (v0.10, задача 11; v0.11, задача 12 — info level → папка Display; notes/monsters_pc.md)
     info: nearby              [off]              g_monNearby (подписи над мобами)
     info: target (shortcut F5) [off]             g_monTarget (панель моба в центре экрана)
@@ -23,16 +29,17 @@ Main
     show                      < monsters | monsters + NPC | all characters >  g_monWho
     Display              14 >   ПАПКА (CT_FOLDER, категория строк "Monsters/Display"), g_monShow[MF_*]
         name [on] · class (target only) [off] · HP [on] · level · damage / defense / resistance · move state ·
-        AI behaviour · cooldowns · target · distance (target only) · position · hits [off] · all on · all off
+        AI behaviour · cooldowns · target · distance (target only) · position · hits [on с v0.12] · all on · all off
     damage info               [off]              g_monDamage (опция игры DamageIndicators, пока on)
     freeze monsters           [off]              g_monFreeze (байт 0x014D4278 = 0)
 > Camera               1 >
-    showCameraPosition        [off]              g_showCameraPosition
+    showCameraPosition        [off]              g_showCameraPosition (v0.12: + карта / регионы, triggers_pc.md §8)
 > Menu                 2 >
     Panel opacity             < 0.80 >  0.30…1.00 шаг 0.05
     Text scale                < 1.00 >  0.75…2.00 шаг 0.25
-> Keys                 8 >   (v0.9, задача 10, §6; v0.10 + info: target)
-    debug on/off / menu / playerFly / Show triggers / attach (in flight) / time (in flight) / info: target   [F10] [F1] [F2] [F3] [R] [T] [F5]
+> Keys                 9 >   (v0.9, задача 10, §6; v0.10 + info: target; v0.12 + triggers info: target)
+    debug on/off / menu / playerFly / Show triggers / attach (in flight) / time (in flight) / info: target /
+    triggers info: target   [F10] [F1] [F2] [F3] [R] [T] [F5] [F6]
     reset to defaults
 ```
 До 08 (v0.2–v0.6) были Xbox-категории General / Camera / Graphics / Menu. В 08 изменились только раздел и подпись `triggers depth` → `depth`; значения по умолчанию, клавиши, колбэки — те же. Других пунктов в реестре не было (9 пунктов до и после).
@@ -91,3 +98,11 @@ Main
 - Раздел Monsters: пункт info level убран, на его месте по смыслу (после nearby range / show) — папка **Display** (дерево в §1, устройство полей — `monsters_pc.md` §9). Число пунктов раздела не изменилось (7): индексы damage info (5) и freeze (6) те же.
 - Офлайн-тест (кадры 1682–1720 переписаны под Display; новые 12a–12i — кадры 1800–1860, снимки shot63–73): путь в шапке, Esc → Monsters с курсором на Display, Enter → снова на запомненной строке (hits), F1 закрывает/открывает внутри папки, поля по одному (name → +class/HP/level → +stats/move/AI/cooldowns → +target/distance/pos/hits), влево на переключателе = off (не назад), all off → подписей 0, панель «all lines are off», all on, влево на действии = назад, damage info + удар → строка hits, вправо открывает папку, Esc Esc → Main, F1 открывает на Main. Старые сценарии 03–11 прошли.
 - Особенность ImGui (было и раньше): высота панели меню подстраивается со сдвигом в 1 кадр — на снимке сразу после перехода панель бывает выше/ниже нужного (в игре — 1 кадр).
+
+## 9. v0.12 (задача 13): Triggers info, KA_TRIGTARGET, карта
+- Раздел **Triggers** — 7 строк: после show disabled — info: nearby, info: target (F6), nearby range (те же шаги, что у Monsters, `kMonRangeNames`), папка **Display** (13 строк, дерево в §1). Устройство — `triggers_pc.md` §7. Старые 3 строки не менялись (индексы те же).
+- Новое действие **KA_TRIGTARGET** (после KA_TARGET): имя в файле `triggerTarget`, подпись `triggers info: target`, по умолчанию **F6** (свободна), токен `{trigtarget}`, `Keys_HotkeyNow` при `g_debugOn`, `RunHotkey` → `Trig_ToggleTarget()`. В Keys — строка перед reset (теперь 9 строк); reset — F10, F1, F2, F3, R, T, F5, F6. Старый файл (v0.9 / v0.10–v0.11) дописывается строками новых действий (`a >= KA_TARGET`), занятая F6 → первая свободная клавиша по умолчанию.
+- **F10 off** → `Trig_OnDebugOff()` (nearby / target off), лог `| triggers info off`.
+- `Menu_PanelBottom()` — низ открытого меню (прошлый кадр): панель цели триггеров встаёт под меню.
+- showCameraPosition: после координат — `World_Panel()` (карта, активный и загруженные регионы, `triggers_pc.md` §8).
+- Офлайн-тест: `triggers_pc.md` §7 (кадры 1858–1955).

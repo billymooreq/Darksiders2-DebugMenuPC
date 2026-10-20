@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.11 (task 12)"
+#define DBGMENU_VERSION "dbgmenu v0.12 (task 13)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -68,9 +68,11 @@ void Info_Draw();
 bool Menu_WantsDraw();
 void Menu_Status(const char *fmt, ...);
 void Menu_OnDebugSwitch(bool on);  // task 10: F10 on / off (status cleared, key capture cancelled)
+float Menu_PanelBottom();          // task 13: y of the bottom of the open menu (last frame), 0 = closed
 
 // ---- keys.cpp: task 10, the master switch (F10) and the hotkeys the player can change (dbgmenu_keys.ini) ----
 enum KeyAction { KA_NONE = 0, KA_DEBUG, KA_MENU, KA_FLY, KA_TRIGGERS, KA_ATTACH, KA_TIME, KA_TARGET,  // 11: info: target
+                 KA_TRIGTARGET,  // 13: Triggers > info: target
                  KA_COUNT };
 enum { KQ_CAPTURE = 0x1000, KQ_ACTION = 0x2000 };  // key queue: a key for the menu Keys / a hotkey that was run
 extern volatile LONG g_debugOn;     // the debug menu is on (off after the game starts)
@@ -81,7 +83,8 @@ const char *Keys_KeyName(int action);  // "F1"
 const char *Keys_Label(int action);    // "menu", "attach (in flight)"
 const char *Keys_Name(int vk);      // any key, also the forbidden ones ("Space")
 bool Keys_Allowed(int vk);
-int Keys_HotkeyNow(int vk);         // KA_DEBUG always; KA_MENU / KA_FLY / KA_TRIGGERS / KA_TARGET while it is on
+int Keys_HotkeyNow(int vk);         // KA_DEBUG always; KA_MENU / KA_FLY / KA_TRIGGERS / KA_TARGET / KA_TRIGTARGET
+                                    // while it is on
 bool Keys_Assign(int action, int vk, int *swapped);  // false = not allowed; writes the file
 void Keys_ResetDefaults();          // writes the file
 const char *Keys_FilePath();
@@ -160,7 +163,8 @@ void Trig_DrawStatus();            // overlay frame (ImGui): "triggers: N drawn 
 void Trig_StartCapture();          // log one frame of render target / depth / Clear calls
 void Trig_D3DEvent(int type, IDirect3DDevice9 *dev, DWORD a, DWORD b, void *p);  // device hooks -> timeline
 void Trig_TestControl(int cmd);    // test mode: 8 projection check, 9 empty list, 10 broken list, 11 normal,
-                                   // 13 exception in the next collection, 14 8000 objects (timing)
+                                   // 13 exception in the next collection, 14 8000 objects (timing),
+                                   // 29 the player enters the door trigger, 30 leaves it, 31 exception in the info
 
 // task 11: for monsters.cpp - the view of this frame (false = no 3D view this frame) and the EventManagers of the
 // loaded world (real game only)
@@ -168,9 +172,45 @@ bool Trig_View(float *vp, float *cam, float *proj);
 int Trig_EventManagers(void **out, int max);
 int Trig_Worlds(void **out, int max);  // max >= 4
 
+// task 13: trigger info (like Monsters): labels near the player, the panel of the trigger in the centre, Display
+enum { TF_NAME, TF_CLASS, TF_DEST, TF_EVENTS, TF_FILTER, TF_FLAGS, TF_STATE, TF_SHAPE, TF_POS, TF_DIST, TF_ALL,
+       TF_COUNT };
+extern bool g_trigNearby;          // menu Triggers -> info: nearby
+extern bool g_trigTarget;          // menu Triggers -> info: target (key F6)
+extern int g_trigRange;            // menu Triggers -> nearby range (index: 10 20 30 50 75 100 150 m, unlimited)
+extern bool g_trigShow[TF_COUNT];  // menu Triggers > Display (default: name, class, leads to; not saved)
+void Trig_ShowAll(bool on);        // Display > all on / all off
+void Trig_ToggleTarget();          // the info: target key
+void Trig_OnDebugOff();            // F10 off: info off
+bool Trig_StatusShown();           // the "triggers:" line at the bottom left is drawn (monsters' summary goes above)
+void Trig_InfoDraw2D();            // overlay frame (ImGui): labels, the target panel and its highlight
+
 // task 09: hooks of the detector body overlap callbacks (before the original): log "trigger fired" for the player
 void Trig_OnDetectorAdd(void *body, void *collidable);  // 0x008B82DD: a collidable starts overlapping
 void Trig_OnDetectorRemove(void *body, void *obj);      // 0x008B815A: an object stops overlapping
+
+// ---- reflect.cpp: task 13, the game's reflection (class -> properties -> values; notes/triggers_pc.md §7) ----
+typedef void (*ReflVisit)(void *ctx, const char *cls, const char *prop, int type, const char *value);  // NULL = unread
+void *Refl_ClassOf(void *obj);              // class descriptor (NULL = not a reflected object)
+void *Refl_ClassParent(void *cls);
+const char *Refl_ClassName(void *cls);
+bool Refl_IsKindOf(void *obj, const char *className);
+void Refl_ClassChain(void *obj, char *buf, int size, int levels);  // "killregiontrigger > KillRegion > ..."
+const char *Refl_NameText(const void *name); // Name (8 bytes) -> text (cached)
+const char *Refl_ObjName(void *obj);        // WorldObject Name +0x50 ("" = none)
+int Refl_Visit(void *obj, ReflVisit fn, void *ctx);  // every property, most derived class first; returns the count
+bool Refl_Get(void *obj, const char *prop, char *out, int size);
+int Refl_GetArrayDwords(void *obj, const char *prop, DWORD *out, int maxDwords, int *elemDwords);
+void Refl_FakeName(void *name, const char *text);    // test mode: a Name that Refl_NameText understands
+void Refl_FakeClass(void *cls, const char *name, void *parent, void **props, int numProps);
+void *Refl_FakeProp(int i);                 // test mode: fake property (reflect.cpp kFakeProps)
+void Refl_FakeGetPos();                     // test mode: a getPos with the shape of 0x008EF6B2 (+0x90)
+
+// ---- world.cpp: task 13, the current map (showCameraPosition) ----
+void World_Panel();                         // the map lines (inside the showCameraPosition window)
+void World_Refresh();
+const char *World_RegionName(int id);       // NULL = unknown
+void World_TestControl(int cmd);            // test mode: 27 = another map, 28 = back
 
 // ---- monsters.cpp: section Monsters (task 11, notes/monsters_pc.md) ----
 enum { MW_MONSTERS = 0, MW_NPC = 1, MW_ALL = 2 };
@@ -181,7 +221,7 @@ extern bool g_monFreeze;           // menu Monsters -> freeze monsters (toggleMo
 // task 12: menu Monsters > Display - one switch per line of the labels and the target panel (order of the lines)
 enum { MF_NAME, MF_CLASS, MF_HP, MF_LEVEL, MF_STATS, MF_MOVE, MF_AI, MF_COOLDOWNS, MF_TARGET, MF_DIST, MF_POS, MF_HITS,
        MF_COUNT };
-extern bool g_monShow[MF_COUNT];   // default: name and HP on (not saved between runs)
+extern bool g_monShow[MF_COUNT];   // default: name, HP and hits on (not saved between runs)
 void Mon_ShowAll(bool on);         // Display > all on / all off
 extern int g_monRange;             // menu Monsters -> nearby range (index: 10 20 30 50 75 100 150 m, unlimited)
 extern int g_monWho;               // menu Monsters -> show: MW_*

@@ -13,13 +13,14 @@
 
 volatile LONG g_debugOn;
 
-// task 11: + info: target (Monsters), default F5
-static const int kDefaults[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T', VK_F5};
-static int s_keys[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T', VK_F5};
+// task 11: + info: target (Monsters), default F5; task 13: + Triggers info: target, default F6
+static const int kDefaults[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T', VK_F5, VK_F6};
+static int s_keys[KA_COUNT] = {0, VK_F10, VK_F1, VK_F2, VK_F3, 'R', 'T', VK_F5, VK_F6};
 static const char *const kIniNames[KA_COUNT] = {"", "debug", "menu", "playerFly", "showTriggers", "attach", "time",
-                                                "infoTarget"};
+                                                "infoTarget", "triggerTarget"};
 static const char *const kLabels[KA_COUNT] = {"", "debug on/off", "menu", "playerFly", "Show triggers",
-                                              "attach (in flight)", "time (in flight)", "info: target"};
+                                              "attach (in flight)", "time (in flight)", "info: target",
+                                              "triggers info: target"};
 static char s_path[MAX_PATH];
 
 // keys that can be assigned (name = the name in the file)
@@ -106,6 +107,7 @@ int Keys_HotkeyNow(int vk)
     if (vk == s_keys[KA_FLY]) return KA_FLY;
     if (vk == s_keys[KA_TRIGGERS]) return KA_TRIGGERS;
     if (vk == s_keys[KA_TARGET]) return KA_TARGET;
+    if (vk == s_keys[KA_TRIGTARGET]) return KA_TRIGTARGET;
     return KA_NONE;
 }
 
@@ -140,6 +142,7 @@ static bool Save(const char *why)
           "; attach       - in a flight: carry the player in front of the camera (default R)\n"
           "; time         - in a flight: freeze / run the time (default T)\n"
           "; infoTarget   - Monsters: the info panel of the monster in the centre of the screen (default F5)\n"
+          "; triggerTarget - Triggers: the info panel of the trigger in the centre of the screen (default F6)\n"
           ";\n"
           "; Key names: F1-F24 (not F4), A-Z (not W A S D C), 0-9, Numpad0-Numpad9, NumpadMultiply, NumpadAdd,\n"
           ";   NumpadSubtract, NumpadDecimal, NumpadDivide, Insert, Delete, Home, End, PageUp, PageDown,\n"
@@ -313,23 +316,26 @@ void Debug_Toggle(const char *why)
     if (!g_debugOn) {
         InterlockedExchange(&g_debugOn, 1);
         Menu_OnDebugSwitch(true);
-        Log("debug: ON (%s) | keys: menu %s, playerFly %s, Show triggers %s, info: target %s, off %s", why,
-            Keys_KeyName(KA_MENU), Keys_KeyName(KA_FLY), Keys_KeyName(KA_TRIGGERS), Keys_KeyName(KA_TARGET),
-            Keys_KeyName(KA_DEBUG));
+        Log("debug: ON (%s) | keys: menu %s, playerFly %s, Show triggers %s, info: target %s, triggers target %s, "
+            "off %s", why, Keys_KeyName(KA_MENU), Keys_KeyName(KA_FLY), Keys_KeyName(KA_TRIGGERS),
+            Keys_KeyName(KA_TARGET), Keys_KeyName(KA_TRIGTARGET), Keys_KeyName(KA_DEBUG));
         return;
     }
     InterlockedExchange(&g_debugOn, 0);
     bool menu = g_menuOpen != 0, flying = g_flying != 0, trig = g_showTriggers, cam = g_showCameraPosition;
+    bool tinfo = g_trigNearby || g_trigTarget;
     bool mon = g_monNearby || g_monTarget, frz = g_monFreeze, dmg = g_monDamage;
     Input_SetMenuOpen(false);
     if (flying) Flight_RequestStop();  // like F2, done by the next game frame
     g_showTriggers = false;
     g_showCameraPosition = false;
     Mon_OnDebugOff();  // task 11: info off, monsters move again, the game's DamageIndicators back
+    Trig_OnDebugOff();  // task 13: triggers info off
     Menu_OnDebugSwitch(false);
-    Log("debug: OFF (%s)%s%s%s%s%s%s%s - the game gets every key but %s", why, menu ? " | menu closed" : "",
+    Log("debug: OFF (%s)%s%s%s%s%s%s%s%s - the game gets every key but %s", why, menu ? " | menu closed" : "",
         flying ? (Flight_Attached() ? " | flight ends, the carried player stays (hover)" : " | flight ends") : "",
-        trig ? " | Show triggers off" : "", cam ? " | showCameraPosition off" : "", mon ? " | monsters info off" : "",
-        frz ? " | freeze monsters off" : "", dmg ? " | damage info off" : "", Keys_KeyName(KA_DEBUG));
+        trig ? " | Show triggers off" : "", tinfo ? " | triggers info off" : "", cam ? " | showCameraPosition off" : "",
+        mon ? " | monsters info off" : "", frz ? " | freeze monsters off" : "", dmg ? " | damage info off" : "",
+        Keys_KeyName(KA_DEBUG));
     Cursor_Update();
 }

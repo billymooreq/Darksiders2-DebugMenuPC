@@ -162,7 +162,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1862; frame++) {
+    for (int frame = 1; frame <= 1960; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -463,24 +463,24 @@ int main()
         case 1582: Key('W'); break;
         case 1584: Click(); break;
         case 1586: Snapshot("shot43.bmp"); break;
-        case 1588: Say("10d: F6 -> menu = F6"); Key(VK_F6); break;
+        case 1588: Say("10d: F7 -> menu = F7"); Key(VK_F7); break;
         case 1590: Snapshot("shot44.bmp"); break;
-        case 1592: Say("10d: F6 closes the menu; F1 now reaches the game"); Key(VK_F6); Key(VK_F1); break;
-        case 1595: Say("10d: Keys > playerFly = F6: conflict, swapped (menu = F2)"); Key(VK_F6); Key(VK_DOWN); Key(VK_RETURN); break;
-        case 1597: Key(VK_F6); break;
+        case 1592: Say("10d: F7 closes the menu; F1 now reaches the game"); Key(VK_F7); Key(VK_F1); break;
+        case 1595: Say("10d: Keys > playerFly = F7: conflict, swapped (menu = F2)"); Key(VK_F7); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1597: Key(VK_F7); break;
         case 1599: Snapshot("shot45.bmp"); break;
         case 1601: Say("10d: attach = Y, time = R"); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
         case 1603: Key('Y'); break;
         case 1604: Key(VK_DOWN); Key(VK_RETURN); break;
         case 1606: Key('R'); break;
         case 1608: Say("10e: the file after the changes"); PrintFile(); break;
-        case 1610: Say("10e: F2 closes the menu, F6 flight, Y carried, T nothing, R time frozen"); Key(VK_F2); break;
-        case 1612: Key(VK_F6); break;
+        case 1610: Say("10e: F2 closes the menu, F7 flight, Y carried, T nothing, R time frozen"); Key(VK_F2); break;
+        case 1612: Key(VK_F7); break;
         case 1615: Key('Y'); break;
         case 1617: Key('T'); break;
         case 1618: Key('R'); break;
         case 1620: Snapshot("shot46.bmp"); break;
-        case 1622: Say("10e: F6: the carried player stays, hover"); Key(VK_F6); break;
+        case 1622: Say("10e: F7: the carried player stays, hover"); Key(VK_F7); break;
         case 1624: Snapshot("shot47.bmp"); break;
         case 1626: KeyDown(VK_SPACE); break;
         case 1628: KeyUp(VK_SPACE); break;
@@ -494,7 +494,7 @@ int main()
         case 1636: Key(VK_F11); break;
         case 1640: Say("10g: file with only menu = F2: playerFly gets the free default F1");
             WriteFile("menu = F2\n"); Ctl(16); break;
-        case 1643: Say("10g: F2 opens the menu; Keys > reset to defaults"); Key(VK_F2); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;  // 11: + info: target
+        case 1643: Say("10g: F2 opens the menu; Keys > reset to defaults"); Key(VK_F2); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;  // 11: + info: target, 13: + triggers target
         case 1645: Snapshot("shot48.bmp"); break;
         case 1647: Key(VK_F1); PrintFile(); break;
         case 1650: Say("10g: read again: no problems"); Ctl(16); break;
@@ -573,13 +573,13 @@ int main()
         case 1765: Say("11l: debug off: F5 reaches the game"); Key(VK_F5); break;
         case 1766: Say("11l: F10 on: the Monsters items stay off"); SysKey(VK_F10); break;
         case 1768: Ctl(18); break;
-        case 1770: Say("11m: Keys > info: target = F7 (F5 back to the game)"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
+        case 1770: Say("11m: Keys > info: target = F7 (F5 back to the game)"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // 13: + triggers target row
         case 1772: Key(VK_F7); break;
         case 1774: Snapshot("shot61.bmp"); PrintFile(); break;
         case 1776: Key(VK_F1); break;
         case 1777: Key(VK_F7); Key(VK_F5); break;
         case 1779: Snapshot("shot62.bmp"); break;
-        case 1780: Say("11m: reset to defaults"); Key(VK_F7); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1780: Say("11m: reset to defaults"); Key(VK_F7); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
         case 1781: Key(VK_F1); break;
         case 1784: Say("11n: a keys file of v0.9 (no infoTarget line): the line is added with F5"); WriteFile("debug = F10\nmenu = F1\nplayerFly = F2\nshowTriggers = F3\nattach = R\ntime = T\n"); Ctl(16); PrintFile(); break;
         case 1788: Say("11n: an old file where menu = F5: infoTarget gets another free default"); WriteFile("debug = F10\nmenu = F5\nplayerFly = F2\nshowTriggers = F3\nattach = R\ntime = T\n"); Ctl(16); PrintFile(); break;
@@ -636,7 +636,70 @@ int main()
         case 1851: Say("12i: F1 opens at Main (Monsters)"); Key(VK_F1); break;
         case 1853: Key(VK_F1); break;
         case 1856: Say("final: F10 off"); SysKey(VK_F10); Ctl(18); break;
-        case 1860: Say("final cursor state: released"); Ctl(6); break;
+        // ---- task 13: Triggers info (fake triggers of triggers.cpp with fake classes / properties of reflect.cpp:
+        // Door_Z2_Trigger straight ahead (TriggerRegion: OneShot, FilterList Player Horse, OnEnterList, a script
+        // listener), KillReg_Pit_01 (killregiontrigger > KillRegion: Waypoint), LoadRegion_02 (LoadOnEnter regions 2,
+        // 3), CamInfl_01 (MaxDistance), Capsule_Trg, Disabled_Trg, Big_LoadRegion around the camera, Behind_Det,
+        // Odd_Shape; the fake world test_world (world.cpp) has 5 regions) ----
+        case 1858: Say("13a: F10 on; F6 -> Triggers info: target without Show triggers: the door in yellow + panel");
+            SysKey(VK_F10); Ctl(12); break;
+        case 1859: Key(VK_F6); break;
+        case 1862: Snapshot("shot74.bmp"); break;
+        case 1863: Say("13b: menu Triggers (7 rows): info: nearby on"); Key(VK_F1); Key(VK_UP); Key(VK_RETURN);
+            Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1865: Snapshot("shot75.bmp"); break;
+        case 1866: Key(VK_F1); break;
+        case 1868: Snapshot("shot76.bmp"); break;
+        case 1869: Say("13c: Triggers > Display: all on"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN);
+            Key(VK_RETURN); for (int i = 0; i < 11; i++) Key(VK_DOWN);
+            Key(VK_RETURN); break;
+        case 1871: Snapshot("shot77.bmp"); break;
+        case 1872: Key(VK_F1); break;
+        case 1874: Snapshot("shot78.bmp"); break;
+        case 1875: Say("13d: the player enters the door trigger (inside, in 1)"); Ctl(29); break;
+        case 1878: Snapshot("shot79.bmp"); Ctl(30); break;
+        case 1880: Say("13d: leaves, enters again (in 2 / out 1)"); Ctl(29); break;
+        case 1883: Snapshot("shot80.bmp"); break;
+        case 1884: Say("13e: Display > all off: no labels, the panel says so"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1885: Key(VK_F1); break;
+        case 1887: Snapshot("shot81.bmp"); break;
+        case 1888: Say("13f: the defaults: name, class, leads to; Esc -> Triggers on Display"); Key(VK_F1);
+            for (int i = 0; i < 12; i++) Key(VK_UP);
+            Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_ESCAPE); break;
+        case 1890: Snapshot("shot82.bmp"); break;
+        case 1891: Key(VK_F1); break;
+        case 1893: Say("13g: + Show triggers (F3)"); Key(VK_F3); break;
+        case 1896: Snapshot("shot83.bmp"); break;
+        case 1897: Say("13h: flight: strafe + turn - the labels stay, the target follows the view"); Key(VK_F2); break;
+        case 1899: KeyDown('A'); Mouse(300, 300); break;
+        case 1900: Mouse(360, 300); break;
+        case 1904: KeyUp('A'); break;
+        case 1906: Snapshot("shot84.bmp"); break;
+        case 1907: Key(VK_F2); Key(VK_F3); Ctl(12); break;
+        case 1909: Say("13i: showCameraPosition: the map lines"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN);
+            Key(VK_RETURN); Key(VK_RETURN); break;
+        case 1910: Key(VK_F1); break;
+        case 1913: Snapshot("shot85.bmp"); break;
+        case 1914: Say("13i: map change (fake other_world)"); Ctl(27); break;
+        case 1917: Snapshot("shot86.bmp"); Ctl(28); break;
+        case 1919: Say("13j: Keys > triggers info: target = F7; F6 reaches the game; F7 switches the panel");
+            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
+        case 1921: Key(VK_F7); break;
+        case 1923: Snapshot("shot87.bmp"); PrintFile(); break;
+        case 1924: Key(VK_F1); break;
+        case 1926: Key(VK_F6); Key(VK_F7); break;
+        case 1928: Snapshot("shot88.bmp"); break;
+        case 1929: Say("13j: reset to defaults (F6 again)"); Key(VK_F7); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1930: Key(VK_F1); PrintFile(); break;
+        case 1932: Say("13k: exception in the info reading -> info off, F6 on again"); Ctl(31); break;
+        case 1935: Key(VK_F6); break;
+        case 1937: Snapshot("shot89.bmp"); break;
+        case 1938: Say("13l: 8000 triggers with info: target (timing)"); Ctl(14); break;
+        case 1944: Ctl(8); Snapshot("shot90.bmp"); break;
+        case 1946: Ctl(11); break;
+        case 1948: Say("13m: F10 off: the info off, F6 reaches the game"); SysKey(VK_F10); break;
+        case 1951: Snapshot("shot91.bmp"); Key(VK_F6); break;
+        case 1955: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();
