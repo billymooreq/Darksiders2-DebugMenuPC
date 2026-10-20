@@ -269,6 +269,9 @@ static bool FilterMessage(UINT m, WPARAM w, LPARAM l)
     case WM_ACTIVATEAPP:
         FocusChanged(w != 0, w ? "WM_ACTIVATEAPP 1" : "WM_ACTIVATEAPP 0");
         return false;
+    case WM_DESTROY:
+        Cheats_OnUnload();  // task 15: the game's PlayerInvincible byte back before the game shuts down
+        return false;
     case WM_ACTIVATE:
         if (LOWORD(w) == WA_INACTIVE) FocusChanged(false, "WM_ACTIVATE inactive");
         else if (!HIWORD(w)) FocusChanged(true, "WM_ACTIVATE");

@@ -162,7 +162,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1960; frame++) {
+    for (int frame = 1; frame <= 2030; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -175,7 +175,7 @@ int main()
         case 3: Key('W'); break;                            // menu closed: must reach the game
         case 4: Say("10a: F10 (WM_SYSKEYDOWN): debug on, not to the game"); SysKey(VK_F10); break;
         case 5: Key(VK_F1); break;                          // open
-        case 8: Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); break;  // playerFly -> Triggers -> Monsters (11) -> Camera
+        case 8: Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); break;  // playerFly -> Triggers -> Monsters (11) -> Cheats (15) -> Camera
         case 11: Key(VK_RETURN); break;                     // enter category
         case 14: Key(VK_RETURN); break;                     // showCameraPosition on
         case 16: Key('W'); break;                           // menu open: must NOT reach the game
@@ -374,13 +374,13 @@ int main()
         case 1282: Say("08c: playerFly -> playerFly: Enter enters the flight"); Key(VK_DOWN); Key(VK_RETURN); break;  // 09: hover jump is the last of 6
         case 1286: Snapshot("shot24.bmp"); break;
         case 1288: Say("08c: Enter again: flight off"); Key(VK_RETURN); break;
-        case 1292: Say("08d: Camera section: showCameraPosition off, on"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RETURN); break;  // 11: + Monsters
+        case 1292: Say("08d: Camera section: showCameraPosition off, on"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RETURN); break;  // 11: + Monsters, 15: + Cheats
         case 1294: Snapshot("shot25.bmp"); break;
         case 1296: Key(VK_RETURN); break;
         case 1298: Say("08e: Menu section: opacity +0.05, text scale +0.25"); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); Key(VK_DOWN); Key(VK_RIGHT); break;
         case 1300: Snapshot("shot26.bmp"); break;
         case 1302: Say("08e: back to opacity 0.70, text 1.00"); Key(VK_LEFT); Key(VK_UP); Key(VK_LEFT); break;
-        case 1304: Say("08f: Triggers section: Show triggers by Enter"); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;
+        case 1304: Say("08f: Triggers section: Show triggers by Enter"); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;  // 15: + Cheats
         case 1308: Ctl(8); Snapshot("shot27.bmp"); break;
         case 1310: Say("08f: F3 with the menu open: off"); Key(VK_F3); break;
         case 1312: Snapshot("shot28.bmp"); break;
@@ -442,7 +442,7 @@ int main()
         case 1535: Say("cursor state: released"); Ctl(6); break;
         // ---- task 10: F10 master switch, menu Keys, dbgmenu_keys.ini ----
         case 1540: Say("10b: showCameraPosition on, F3 triggers on, F2 flight, R carried, F1 menu open");
-            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); break;
+            Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_RIGHT); break;  // 15: + Cheats
         case 1542: Key(VK_F1); break;
         case 1543: Key(VK_F3); break;
         case 1545: Key(VK_F2); break;
@@ -509,9 +509,9 @@ int main()
         case 1665: Say("11a: debug off: F5 (info: target) reaches the game"); Key(VK_F5); break;
         case 1667: SysKey(VK_F10); break;
         case 1669: Ctl(17); break;
-        case 1670: Say("11b: six sections, Monsters after Triggers"); Key(VK_F1); Key(VK_ESCAPE); break;
+        case 1670: Say("11b: seven sections (15: + Cheats), Monsters after Triggers"); Key(VK_F1); Key(VK_ESCAPE); break;
         case 1672: Snapshot("shot49.bmp"); break;
-        case 1673: Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // Keys -> Menu -> Camera -> Monsters
+        case 1673: Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // Keys -> Menu -> Camera -> Cheats -> Monsters
         case 1675: Snapshot("shot50.bmp"); break;
         case 1676: Say("11b: info: nearby on (level 1, 30 m)"); Key(VK_RETURN); break;
         case 1677: Key(VK_F1); break;
@@ -573,7 +573,7 @@ int main()
         case 1765: Say("11l: debug off: F5 reaches the game"); Key(VK_F5); break;
         case 1766: Say("11l: F10 on: the Monsters items stay off"); SysKey(VK_F10); break;
         case 1768: Ctl(18); break;
-        case 1770: Say("11m: Keys > info: target = F7 (F5 back to the game)"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // 13: + triggers target row
+        case 1770: Say("11m: Keys > info: target = F7 (F5 back to the game)"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // 13: + triggers target row, 15: + Cheats
         case 1772: Key(VK_F7); break;
         case 1774: Snapshot("shot61.bmp"); PrintFile(); break;
         case 1776: Key(VK_F1); break;
@@ -589,7 +589,7 @@ int main()
         case 1794: Say("11: F10 off"); SysKey(VK_F10); Ctl(18); break;
         // ---- task 12: sub-folder Monsters > Display (fake monsters of task 11) ----
         case 1800: Say("12a: F10 on; Main > Monsters > Display: the path in the header"); SysKey(VK_F10); Ctl(17); break;
-        case 1802: Key(VK_F1); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN);  // Keys -> Monsters
+        case 1802: Key(VK_F1); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN);  // Keys -> Monsters (15: + Cheats)
             for (int i = 0; i < 6; i++) Key(VK_UP);  // freeze -> info: nearby
             Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
         case 1804: Snapshot("shot63.bmp"); break;
@@ -676,7 +676,7 @@ int main()
         case 1904: KeyUp('A'); break;
         case 1906: Snapshot("shot84.bmp"); break;
         case 1907: Key(VK_F2); Key(VK_F3); Ctl(12); break;
-        case 1909: Say("13i: showCameraPosition: the map lines"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN);
+        case 1909: Say("13i: showCameraPosition: the map lines"); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN);
             Key(VK_RETURN); Key(VK_RETURN); break;
         case 1910: Key(VK_F1); break;
         case 1913: Snapshot("shot85.bmp"); break;
@@ -700,6 +700,54 @@ int main()
         case 1948: Say("13m: F10 off: the info off, F6 reaches the game"); SysKey(VK_F10); break;
         case 1951: Snapshot("shot91.bmp"); Key(VK_F6); break;
         case 1955: Say("final cursor state: released"); Ctl(6); break;
+        // ---- task 15: section Cheats (fake characters of monsters.cpp: 0 Skel_A01 HP 180, 1 Ghoul_07 90, 2 Ghoul_08 40,
+        // 3 Skel_Far 250 = a boss in its fight (registerBoss, its fight keeps it at HP 1), 4 Behind_01 = a monster on the
+        // player's side (a summoned creature), 5 Vulgrim NPC, 6 Death = the player; Ctl 32..39 in cheats.cpp) ----
+        case 1958: Say("15a: F10 on, fake characters in front of the camera, the state"); SysKey(VK_F10); Ctl(17); Ctl(36); break;
+        case 1959: Ctl(39); break;
+        case 1960: Say("15b: Main: Cheats after Monsters (3 rows)"); Key(VK_F1); Key(VK_ESCAPE); break;
+        case 1962: Snapshot("shot92.bmp"); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); break;  // Keys -> Cheats
+        case 1964: Snapshot("shot93.bmp"); break;
+        case 1965: Say("15c: invincible on (the game byte 0 -> 1), one-hit kill on"); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1967: Snapshot("shot94.bmp"); Ctl(39); break;
+        case 1968: Key(VK_F1); break;
+        case 1970: Say("15d: the player hits Skel_A01 for 20 -> 180 (dies)"); Ctl(32); break;
+        case 1971: Say("15d: a summoned creature hits Ghoul_07 -> lethal; the player hits his own creature -> normal"); Ctl(33); break;
+        case 1972: Say("15d: the boss in its fight -> normal damage; an enemy hits an enemy -> normal"); Ctl(34); break;
+        case 1973: Say("15d: the game keeps a monster alive (HP 1) -> not changed"); Ctl(35); break;
+        case 1974: Ctl(39); break;
+        case 1976: Say("15e: kill all monsters (menu): 3 enemies die, the boss survives (event killAllMonsters), the "
+                       "creature on the player's side is not touched"); Ctl(36); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1979: Snapshot("shot95.bmp"); Ctl(39); break;
+        case 1980: Key(VK_F1); break;
+        case 1982: Say("15f: kill all again: only the boss is alive, it survives again"); Ctl(38); break;
+        case 1984: Ctl(39); break;
+        case 1986: Say("15g: F10 off: invincible and one-hit off, the game byte back to 0; kill all ignored"); SysKey(VK_F10); break;
+        case 1988: Ctl(39); Ctl(38); break;
+        case 1990: Ctl(36); Say("15g: F10 on: the Cheats items stay off; a hit is normal now"); SysKey(VK_F10); break;
+        case 1992: Ctl(37); Ctl(39); break;
+        case 1994: Say("15h: Monsters info + damage info on, one-hit on: the label shows the lethal hit"); Key(VK_F1);
+            Key(VK_ESCAPE); Key(VK_UP); Key(VK_RETURN); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN);
+            Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_ESCAPE); Key(VK_DOWN);
+            Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;  // Cheats opens at kill all -> one-hit kill
+        case 1996: Key(VK_F1); break;
+        case 1998: Ctl(36); Ctl(32); break;
+        case 2001: Snapshot("shot96.bmp"); Ctl(18); Ctl(39); break;
+        case 2003: Say("15i: freeze monsters on + kill all: they die, the update flag stays 0"); Ctl(36); Key(VK_F1); Key(VK_ESCAPE);
+            Key(VK_UP); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 2004: Key(VK_F1); break;
+        case 2006: Ctl(38); break;
+        case 2008: Ctl(18); Ctl(39); break;
+        case 2010: Say("15j: playerFly: kill all in a flight (time frozen)"); Ctl(36); Key(VK_F2); break;
+        case 2012: Key('T'); break;
+        case 2014: Ctl(38); break;
+        case 2016: Ctl(39); Snapshot("shot97.bmp"); Key(VK_F2); break;
+        case 2018: Say("15k: invincible on again, F10 off -> the byte back"); Ctl(36); Key(VK_F1); Key(VK_ESCAPE); Key(VK_DOWN);
+            Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); break;  // Cheats opens at one-hit kill -> invincible
+        case 2019: Key(VK_F1); break;
+        case 2021: Ctl(39); SysKey(VK_F10); break;
+        case 2023: Ctl(39); Snapshot("shot98.bmp"); break;
+        case 2025: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

@@ -106,3 +106,6 @@
 - Пользователь: v0.11 (папка Display) — «всё идеально».
 - Ответы на вопросы отчёта 12: **Display > hits — по умолчанию ON** (сделано в v0.12, `g_monShow` = name, HP, hits); порядок в Monsters (show перед Display) — **оставить**.
 - v0.12: сводка Monsters поднимается над строкой триггеров и тогда, когда у триггеров включена только info (`Trig_StatusShown`).
+
+## 11. v0.13 (задача 15): для раздела Cheats
+- `MK_*` перенесены в `common.h`; новые `Mon_Kind(obj)` (класс → вид, с чтением глобалов классов), `Mon_Characters(out, max)` (все персонажи ActorManager всех загруженных миров, без повторов, без фильтра show/позиции), `Mon_Label` («объект (класс)»), `Mon_ClassHas(obj, "spawn")` (подстрока в цепочке классов), для теста `Mon_FakeObj(i)` / `Mon_FakeHeal()` (`kFakeStartHp`). Урон one-hit / kill all виден в damage info / hits как обычный (−HP, HP 0). Подробно — `cheats_pc.md`.

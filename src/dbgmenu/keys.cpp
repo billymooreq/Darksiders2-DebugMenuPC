@@ -325,17 +325,19 @@ void Debug_Toggle(const char *why)
     bool menu = g_menuOpen != 0, flying = g_flying != 0, trig = g_showTriggers, cam = g_showCameraPosition;
     bool tinfo = g_trigNearby || g_trigTarget;
     bool mon = g_monNearby || g_monTarget, frz = g_monFreeze, dmg = g_monDamage;
+    bool cheats = g_cheatInvincible || g_cheatOneHit;
     Input_SetMenuOpen(false);
     if (flying) Flight_RequestStop();  // like F2, done by the next game frame
     g_showTriggers = false;
     g_showCameraPosition = false;
     Mon_OnDebugOff();  // task 11: info off, monsters move again, the game's DamageIndicators back
     Trig_OnDebugOff();  // task 13: triggers info off
+    Cheats_OnDebugOff();  // task 15: invincible / one-hit kill off, the game's PlayerInvincible back
     Menu_OnDebugSwitch(false);
-    Log("debug: OFF (%s)%s%s%s%s%s%s%s%s - the game gets every key but %s", why, menu ? " | menu closed" : "",
+    Log("debug: OFF (%s)%s%s%s%s%s%s%s%s%s - the game gets every key but %s", why, menu ? " | menu closed" : "",
         flying ? (Flight_Attached() ? " | flight ends, the carried player stays (hover)" : " | flight ends") : "",
         trig ? " | Show triggers off" : "", tinfo ? " | triggers info off" : "", cam ? " | showCameraPosition off" : "",
         mon ? " | monsters info off" : "", frz ? " | freeze monsters off" : "", dmg ? " | damage info off" : "",
-        Keys_KeyName(KA_DEBUG));
+        cheats ? " | cheats off" : "", Keys_KeyName(KA_DEBUG));
     Cursor_Update();
 }

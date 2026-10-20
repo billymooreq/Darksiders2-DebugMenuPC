@@ -106,3 +106,15 @@ Main
 - `Menu_PanelBottom()` — низ открытого меню (прошлый кадр): панель цели триггеров встаёт под меню.
 - showCameraPosition: после координат — `World_Panel()` (карта, активный и загруженные регионы, `triggers_pc.md` §8).
 - Офлайн-тест: `triggers_pc.md` §7 (кадры 1858–1955).
+
+## 10. v0.13 (задача 15): раздел Cheats
+- Раздел **Cheats** — 3 строки в `g_commands[]` сразу после строк `Monsters/Display` (порядок разделов: playerFly, Triggers, Monsters, **Cheats**, Camera, Menu, Keys — 7):
+  ```
+  > Cheats               3 >
+      invincible                [off]   g_cheatInvincible (CT_TOGGLE -> Cheats_MenuChanged(true): байт игры сразу)
+      one-hit kill              [off]   g_cheatOneHit     (CT_TOGGLE -> Cheats_MenuChanged(false))
+      kill all monsters                 CT_ACTION -> Cheats_RequestKillAll(), статус "kill all monsters..." -> итог пишет cheats.cpp
+  ```
+  Горячих клавиш нет (Keys не менялся), не сохраняются. Устройство — `cheats_pc.md`.
+- **F10 off** → `Cheats_OnDebugOff()` (оба off, байт игры назад), лог `| cheats off`.
+- Офлайн-тест: старые сценарии — +1 «вниз»/«вверх» при переходе через Cheats в списке разделов (кадры 8, 1292, 1304, 1540, 1673, 1770, 1802, 1909); новые 15a–15k — кадры 1958–2025 (`cheats_pc.md` §4). Проверка совпадения навигации: строки `menu: open/execute/opened/closed/back/…` лога нового прогона построчно сравнены с прогоном старой DLL (из папки игры) на том же тесте до вставки сценариев 15.

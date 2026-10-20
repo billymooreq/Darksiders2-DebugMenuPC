@@ -79,6 +79,7 @@ static HRESULT STDMETHODCALLTYPE hkPresent(IDirect3DDevice9 *dev, const RECT *sr
             Trig_Frame();
             Flight_Frame();
             Mon_Frame();
+            Cheats_Frame();
         }
         Trig_OnPresent(dev);  // depth mode, if the HUD pass did not draw this frame
         Overlay_OnFrame(dev);
@@ -97,6 +98,7 @@ static HRESULT STDMETHODCALLTYPE hkSCPresent(IDirect3DSwapChain9 *sc, const RECT
             Trig_Frame();
             Flight_Frame();
             Mon_Frame();
+            Cheats_Frame();
         }
         if (SUCCEEDED(sc->GetDevice(&dev)) && dev) {
             Trig_OnPresent(dev);
@@ -249,6 +251,7 @@ static void __fastcall hkFrame(void *game)
     Trig_Frame();    // task 07: trigger snapshot (before the frame, like the flight)
     Flight_Frame();  // between frames: requests, pause, teleport, camera matrix for this frame
     Mon_Frame();     // task 11: freeze monsters / damage info flags follow the menu
+    Cheats_Frame();  // task 15: the invincible byte follows the menu; kill all monsters (requested by the menu)
     o_Frame(game);
 }
 
@@ -317,6 +320,21 @@ static bool __fastcall hkOptChanged(void *opt)
     return r;
 }
 
+// task 15: Monster::applyDamage (Monster vt[0x16C], every monster class; ret 4) - one-hit kill raises the damage of
+// a player's hit to the enemy's HP before the game applies it (cheats.cpp)
+#define PC_MON_APPLYDMG 0x007B310Fu
+typedef int(__fastcall *MonApply_t)(void *mon, void *edx, void *dmg);
+static MonApply_t o_MonApply;
+
+static int __fastcall hkMonApply(void *mon, void *edx, void *dmg)
+{
+    CheatHit h;
+    Cheats_MonsterDamage(mon, dmg, &h);
+    int r = o_MonApply(mon, edx, dmg);
+    if (h.boosted) Cheats_MonsterDamageDone(mon, &h);
+    return r;
+}
+
 static void *__fastcall hkGetCamMatrix(void *game, void *edx, float *out)
 {
     void *r = o_GetCamMatrix(game, edx, out);
@@ -375,6 +393,10 @@ static void InstallGameHooks()
         !HookGame(PC_OPT_CHANGED, kOptChanged, sizeof(kOptChanged), (void *)hkOptChanged, (void **)&o_OptChanged,
                   "options changed (damage info)"))
         g_monDamageNoHooks = true;
+    static const BYTE kMonApply[] = {0x6A, 0x10, 0x6A, 0x78, 0xB8, 0x0F, 0x57, 0x04, 0x01};  // push 10; push 78; mov eax
+    CheckSlot(0x0121D658u, 0x16C, PC_MON_APPLYDMG, "Monster");
+    g_cheatHookOk = HookGame(PC_MON_APPLYDMG, kMonApply, sizeof(kMonApply), (void *)hkMonApply, (void **)&o_MonApply,
+                             "Monster::applyDamage (one-hit)");
 }
 
 bool Hooks_Install()

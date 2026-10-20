@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.12.1 (task 14)"
+#define DBGMENU_VERSION "dbgmenu v0.13 (task 15)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -234,6 +234,28 @@ extern bool g_monDamageNoHooks;    // the options hooks are not installed -> dam
 int Mon_OptionsHide(void *opt);    // hooks of the options commit / changed: the game sees the player's value
 void Mon_OptionsRestore(void *opt, int prev);  // (any options object, also a copy; -1 = nothing was hidden)
 void Mon_TestControl(int cmd);     // test mode: 17..26
+// task 15: characters for cheats.cpp (the same class check and the same ActorManager walk as the labels)
+enum { MK_NONE = 0, MK_MONSTER, MK_NPC, MK_PLAYER };
+int Mon_Kind(void *obj);                        // MK_* by the class chain (reflection); MK_NONE = not a character
+int Mon_Characters(void **out, int max);        // every character of the loaded world(s), no repeats
+const char *Mon_Label(void *obj, char *buf, int size);  // "Skele_02 (skeleton/skeleton)"
+bool Mon_ClassHas(void *obj, const char *sub);  // a class of its chain has sub in its name (any case)
+void *Mon_FakeObj(int i);                       // test mode: 0..4 monsters, 5 Vulgrim (NPC), 6 Death (player)
+void Mon_FakeHeal();                            // test mode: the start HP again
+
+// ---- cheats.cpp: section Cheats (task 15, notes/cheats_pc.md) ----
+extern bool g_cheatInvincible;     // menu Cheats -> invincible (the game's PlayerInvincible byte 0x01562FED)
+extern bool g_cheatOneHit;         // menu Cheats -> one-hit kill (hook of Monster::applyDamage 0x007B310F)
+extern bool g_cheatHookOk;         // hooks.cpp: the Monster::applyDamage hook is in
+struct CheatHit { bool boosted; float hp, dmg; void *attacker; const char *by; };
+void Cheats_MonsterDamage(void *mon, void *dmg, CheatHit *h);  // hook, before the game: may raise the damage
+void Cheats_MonsterDamageDone(void *mon, const CheatHit *h);   // hook, after the game: the log
+void Cheats_Frame();               // game thread, before every game frame: the invincible byte, kill all
+void Cheats_RequestKillAll();      // menu: done before the next game frame
+void Cheats_MenuChanged(bool invincible);  // menu: a switch changed (applied now, status line)
+void Cheats_OnDebugOff();          // F10 off: both switches off, the game byte back
+void Cheats_OnUnload();            // unload / the game window is destroyed: the game byte back
+void Cheats_TestControl(int cmd);  // test mode: 32..39
 
 // ---- flight.cpp: playerFly ----
 extern bool g_hoverAfterTeleport;  // menu playerFly -> hover after teleport (default on)

@@ -147,6 +147,7 @@ BOOL WINAPI DllMain(HINSTANCE h, DWORD reason, LPVOID reserved)
         }
     } else if (reason == DLL_PROCESS_DETACH) {
         Flight_OnUnload(reserved != NULL);
+        Cheats_OnUnload();  // the game's PlayerInvincible byte back (also at the process exit: harmless)
         if (!reserved) Mon_OnUnload();  // FreeLibrary only: at process exit the game is gone anyway
         Cursor_OnUnload();
         Log("==== unload (process exit=%d) ====", reserved != NULL);
@@ -187,5 +188,6 @@ extern "C" void __cdecl DbgMenuTest(int cmd)
     else if (cmd >= 17 && cmd <= 26) Mon_TestControl(cmd);
     else if (cmd == 27 || cmd == 28) World_TestControl(cmd);  // task 13: map change in the fake world
     else if (cmd >= 29 && cmd <= 31) Trig_TestControl(cmd);   // task 13: trigger info
+    else if (cmd >= 32 && cmd <= 39) Cheats_TestControl(cmd); // task 15: cheats on the fake characters
     else Game_TestControl(cmd);
 }

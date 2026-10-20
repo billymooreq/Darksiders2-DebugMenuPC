@@ -81,7 +81,7 @@ int g_monWho;            // MW_*
 #define OFS_AM_ENTRIES     0x5C          // ActorManager: {data, count} of entries, entry->vt[0x1C]() = the character
 #define VT_ENTRY_ACTOR     0x1C
 
-enum { MK_NONE = 0, MK_MONSTER, MK_NPC, MK_PLAYER };
+// MK_NONE / MK_MONSTER / MK_NPC / MK_PLAYER: common.h (task 15)
 static const float kRangeM[] = {10, 20, 30, 50, 75, 100, 150, 0};  // 0 = unlimited
 // 1 unit = 1 cm: door triggers 250 high, camera 195 behind the player, gravity ~1000 units/s^2 (log v0.10; the
 // Xbox notes' 0.03048 m was wrong)
@@ -179,6 +179,7 @@ static float s_fO[3] = {100, 200, 300}, s_fF[2] = {1, 0};  // camera at cmd 17 (
 static const float kFakeLocal[kFakeObjs][3] = {{600, 0, -60}, {700, -150, -60}, {700, -162, -58}, {4500, 150, -60},
                                                {-600, 0, -60}, {500, 120, -60}, {300, 0, -80}, {550, 60, -60},
                                                {0, 0, 0}};
+static const float kFakeStartHp[kFakeObjs] = {180, 90, 40, 250, 250, 500, 100, 0, 0};  // task 15: Mon_FakeHeal
 static void FakePlace(BYTE *o, float a, float b, float c)
 {
     GameVec *p = (GameVec *)(o + 0x260);  // right = (f.y, -f.x): looking along +X, -Y is to the right
@@ -301,8 +302,8 @@ static void FakeBuild()
         //       obj  class      name        x     y    z    height hp   max  lvl
         static const int kCls[kFakeObjs] = {FC_SKEL, FC_GHOUL, FC_GHOUL, FC_SKEL, FC_SKEL, FC_VULGRIM, FC_DEATH, FC_ITEM,
                                             FC_GHOUL};
-        static const float kH[kFakeObjs] = {70, 60, 60, 70, 70, 0, 75, 0, 0}, kHp[kFakeObjs] = {180, 90, 40, 250, 250,
-                                                                                               500, 100, 0, 0};
+        static const float kH[kFakeObjs] = {70, 60, 60, 70, 70, 0, 75, 0, 0};
+        const float *kHp = kFakeStartHp;
         static const int kMax[kFakeObjs] = {250, 90, 90, 250, 250, 500, 100, 0, 0}, kLvl[kFakeObjs] = {12, 10, 10, 12, 12,
                                                                                                     30, 8, 0, 0};
         for (; n < kFakeObjs; n++) {  // the last one is replaced by a bad pointer in the list; Coin_03 has no stats
@@ -788,6 +789,115 @@ static void CollectInner()
         WalkArray((BYTE *)ams[i], OFS_AM_ENTRIES, true);  // the monsters (Xbox / PC 0x008C963B count them here)
         WalkArray((BYTE *)ams[i], OFS_AM_CHARS, false);
     }
+}
+
+// ======================= task 15: characters for cheats.cpp =======================
+int Mon_Kind(void *obj)
+{
+    if ((UINT_PTR)obj < 0x10000) return MK_NONE;
+    if ((!s_clsMonster || !s_clsNpc || !s_clsPlayer) && !ReadBaseClasses()) return MK_NONE;
+    __try {
+        void *cls = ClassOf(obj);
+        return cls ? KindOf(cls) : MK_NONE;
+    } __except (CatchMon("cheats: class of a character", GetExceptionInformation())) {
+        return MK_NONE;
+    }
+}
+
+static int AddChar(void *p, void **out, int n, int max)
+{
+    if ((UINT_PTR)p < 0x10000 || n >= max) return n;
+    for (int i = 0; i < n; i++)
+        if (out[i] == p) return n;
+    return Mon_Kind(p) != MK_NONE ? (out[n] = p, n + 1) : n;
+}
+
+// both arrays of every ActorManager (the same walk as the labels, but every kind and no position needed)
+int Mon_Characters(void **out, int max)
+{
+    void *ams[4];
+    int na = 0, n = 0;
+    if (Fake()) {
+        FakeBuild();
+        ams[na++] = s_fAm;
+    } else {
+        void *worlds[4];
+        int nw = Trig_Worlds(worlds, 4);
+        for (int i = 0; i < nw && na < 4; i++) {
+            void *am = ActorManagerOf(worlds[i]);
+            bool dup = false;
+            for (int j = 0; j < na; j++) dup |= ams[j] == am;
+            if (am && !dup) ams[na++] = am;
+        }
+    }
+    for (int a = 0; a < na; a++)
+        for (int k = 0; k < 2; k++) {
+            BYTE *am = (BYTE *)ams[a];
+            int ofs = k ? OFS_AM_CHARS : OFS_AM_ENTRIES;
+            void **data;
+            int count;
+            __try {
+                data = *(void ***)(am + ofs);
+                count = *(int *)(am + ofs + 4);
+            } __except (CatchMon("cheats: ActorManager array", GetExceptionInformation())) {
+                continue;
+            }
+            if (count <= 0 || count > 20000 || !data) continue;
+            for (int i = 0; i < count; i++) {
+                void *p;
+                __try {
+                    p = data[i];
+                } __except (EXCEPTION_EXECUTE_HANDLER) {
+                    break;
+                }
+                n = AddChar(k ? p : EntryActor(p), out, n, max);
+            }
+        }
+    return n;
+}
+
+const char *Mon_Label(void *obj, char *buf, int size)
+{
+    buf[0] = 0;
+    __try {
+        void *cls = ClassOf(obj);
+        const char *o = ObjName(obj), *c = ClassName(cls);
+        if (o[0] && strcmp(o, c) != 0) _snprintf_s(buf, size, _TRUNCATE, "%s (%s)", o, c[0] ? c : "?");
+        else _snprintf_s(buf, size, _TRUNCATE, "%s", c[0] ? c : "?");
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        _snprintf_s(buf, size, _TRUNCATE, "%08X", (unsigned)(UINT_PTR)obj);
+    }
+    return buf;
+}
+
+bool Mon_ClassHas(void *obj, const char *sub)
+{
+    __try {
+        void *c = ClassOf(obj);
+        for (int d = 0; c && d < 40; d++) {
+            char low[64];
+            STRCPY(low, ClassName(c));
+            _strlwr_s(low, sizeof(low));
+            if (strstr(low, sub)) return true;
+            c = *(void **)((BYTE *)c + OFS_CLS_PARENT);
+        }
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    }
+    return false;
+}
+
+void *Mon_FakeObj(int i)
+{
+    if (!Fake() || i < 0 || i >= kFakeObjs) return NULL;
+    FakeBuild();
+    return s_fObj[i];
+}
+
+void Mon_FakeHeal()
+{
+    if (!Fake()) return;
+    FakeBuild();
+    for (int i = 0; i < 7; i++) *(float *)(s_fStats[i] + OFS_ST_HP) = kFakeStartHp[i];
 }
 
 // ======================= what one character shows =======================

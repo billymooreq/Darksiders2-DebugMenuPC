@@ -5,6 +5,7 @@
 // section Keys changes the hotkeys (keys.cpp); every key shown on screen is the current one ({menu} etc. below).
 // Task 12: sub-folders inside a section (CT_FOLDER, "Name  N >"; Enter goes in, Esc goes one level up).
 // Task 13: Triggers info (nearby / target F6 / range / Display) and the map lines of showCameraPosition.
+// Task 15: section Cheats (invincible / one-hit kill / kill all monsters) after Monsters.
 #include "common.h"
 #include <stdio.h>
 #include <stdarg.h>
@@ -53,6 +54,9 @@ static void On_TrigNearby();
 static void On_TrigTarget();
 static void Cmd_TrigAllOn();
 static void Cmd_TrigAllOff();
+static void On_CheatInvincible();
+static void On_CheatOneHit();
+static void Cmd_KillAll();
 
 static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
 static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // order of TD_WALLS / TD_DEPTH
@@ -208,6 +212,19 @@ static const Command g_commands[] = {
     {"Monsters/Display", "all on", "Switch every line on.", CT_ACTION, Cmd_MonAllOn, NULL, NULL, 0, 0, 0, KA_NONE},
     {"Monsters/Display", "all off", "Switch every line off (no labels then; the panel only says so).",
      CT_ACTION, Cmd_MonAllOff, NULL, NULL, 0, 0, 0, KA_NONE},
+    // ---- Cheats (task 15, cheats.cpp): not saved; {debug} off switches them off ----
+    {"Cheats", "invincible", "Like the Xbox playerInvincible: the player takes no damage - his HP does not go down, "
+     "also not from poison or fire. Hits still push and stagger him. A fall into a pit (a kill zone) does not kill: "
+     "the game puts him back on safe ground. Stays on after deaths and level loads until you switch it off.",
+     CT_TOGGLE, On_CheatInvincible, &g_cheatInvincible, NULL, 0, 0, 0, KA_NONE},
+    {"Cheats", "one-hit kill", "Any hit of the player (weapons, abilities, the pistol) or of the creatures he "
+     "summons kills an enemy at once - a normal death with its animation, loot and XP. Friends, NPC and the horse "
+     "are not touched. A boss in its fight takes normal damage (an instant death could break the fight).",
+     CT_TOGGLE, On_CheatOneHit, &g_cheatOneHit, NULL, 0, 0, 0, KA_NONE},
+    {"Cheats", "kill all monsters", "Like the Xbox killMonsters (\"Kill all monsters and spawns\"): every enemy in "
+     "the loaded level dies a normal death - loot, XP, and the doors that open after a fight open. Friends are not "
+     "touched. Bosses get the same blow, as on the Xbox; a boss its fight protects stays alive.",
+     CT_ACTION, Cmd_KillAll, NULL, NULL, 0, 0, 0, KA_NONE},
     // ---- Camera ----
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera, the map (world) "
      "and its regions: the active one and the loaded ones.",
@@ -424,6 +441,14 @@ static void Cmd_TrigAllOff() { Trig_ShowAll(false); Menu_Status("Triggers > Disp
 // task 12: Monsters > Display
 static void Cmd_MonAllOn() { Mon_ShowAll(true); Menu_Status("Monsters > Display: all on"); }
 static void Cmd_MonAllOff() { Mon_ShowAll(false); Menu_Status("Monsters > Display: all off"); }
+// task 15: Cheats (cheats.cpp; kill all runs before the next game frame and writes the status itself)
+static void On_CheatInvincible() { Cheats_MenuChanged(true); }
+static void On_CheatOneHit() { Cheats_MenuChanged(false); }
+static void Cmd_KillAll()
+{
+    Cheats_RequestKillAll();
+    Menu_Status("kill all monsters...");
+}
 
 // task 12: a toggle without its own callback - "Monsters > Display > HP: on"
 static void ToggleDone(const Command *c)
