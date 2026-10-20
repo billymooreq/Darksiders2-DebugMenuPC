@@ -6,7 +6,9 @@
 //     1 [Move states]: the move state; 2 [Move & Script states]: + desc class, object name, AI behaviour (+0xABC);
 //     3 [Move, Script & Cooldowns]: + the behaviour's cooldowns (map +0x120); 4 [Everything]: + target (+0x930) and
 //     distance, "%d/%d HP"; and a screen list "Monsters: %d" / "  %s: %d" per class (level 4: "Characters: %d").
-//     We always show the name and HP (task 11 asks for them) and add the lines of the chosen level.
+//     Task 11 showed the name and HP always plus the lines of the chosen level; task 12 (v0.11): no levels, the
+//     menu folder Monsters > Display switches every line on / off (g_monShow, MF_*; default name + HP), the same
+//     switches for the labels and the target panel; the order of the lines stays fixed, a line that is off is skipped.
 //   Xbox showCharacterDamageInfo (0x825BE870): switches the game option DamageIndicators (options +0x2F) - the HUD
 //     damage numbers (_root.addDamageIndicator, PC 0x005C64A2) and the hit direction (_root.UpdateHudDamage, PC
 //     0x005C3D35). The PC exe still has both. We force the option on only while the menu item is on; the hooks of
@@ -31,7 +33,7 @@
 
 bool g_monNearby, g_monTarget, g_monDamage, g_monFreeze;
 bool g_monDamageNoHooks;
-int g_monLevel;          // 0..3 = Xbox levels 1..4
+bool g_monShow[MF_COUNT] = {true, false, true};  // task 12: Monsters > Display (MF_NAME, MF_HP on)
 int g_monRange = 2;      // kRangeM index (30 m)
 int g_monWho;            // MW_*
 
@@ -1174,45 +1176,87 @@ static const ImU32 kDim = IM_COL32(185, 190, 200, 235);
 static const ImU32 kHit = IM_COL32(255, 160, 60, 255);
 static const ImU32 kFrozen = IM_COL32(110, 220, 255, 255);
 static const ImU32 kTargetCol = IM_COL32(255, 220, 70, 255);
-static const char *const kLevelTitle[4] = {"[Move states]", "[Move & Script states]", "[Move, Script & Cooldowns]",
-                                           "[Everything]"};
+static const char *const kFieldNames[MF_COUNT] = {"name", "class", "HP", "level", "stats", "move", "AI",
+                                                  "cooldowns", "target", "distance", "pos", "hits"};
+
+void Mon_ShowAll(bool on)
+{
+    for (int i = 0; i < MF_COUNT; i++) g_monShow[i] = on;
+}
+
+// task 12: "name HP" / "none" - the Display switches that are on (log)
+static const char *ShowText()
+{
+    static char buf[128];
+    buf[0] = 0;
+    for (int i = 0; i < MF_COUNT; i++)
+        if (g_monShow[i]) {
+            if (buf[0]) strncat_s(buf, sizeof(buf), " ", _TRUNCATE);
+            strncat_s(buf, sizeof(buf), kFieldNames[i], _TRUNCATE);
+        }
+    if (!buf[0]) STRCPY(buf, "none");
+    return buf;
+}
+
+// task 12: is any line of a label on (class and distance are only in the panel; hits only with damage info)
+static bool AnyLabelLine()
+{
+    for (int i = 0; i < MF_COUNT; i++)
+        if (g_monShow[i] && i != MF_CLASS && i != MF_DIST && (i != MF_HITS || g_monDamage)) return true;
+    return false;
+}
+
+static bool AnyPanelLine()
+{
+    for (int i = 0; i < MF_COUNT; i++)
+        if (g_monShow[i] && (i != MF_HITS || g_monDamage)) return true;
+    return false;
+}
 
 struct Line { char s[176]; ImU32 col; };
-static int BuildLines(const MItem &it, const MInfo &mi, Line *l, int max, bool panel)
+// the lines of a label over a monster, always in this order (task 11), each one only while its Display switch is on
+static int BuildLines(const MItem &it, const MInfo &mi, Line *l, int max)
 {
     int n = 0;
     float um = kUnitsPerM;
-    SPRINTF(l[n].s, "%s%s", mi.name, (g_monFreeze && it.kind == MK_MONSTER) ? " [frozen]" : "");
-    l[n++].col = (g_monFreeze && it.kind == MK_MONSTER) ? kFrozen : kWhite;
-    if (mi.stats) SPRINTF(l[n].s, "%.0f/%d HP  lvl %d", mi.hp, mi.maxHp, mi.level);
-    else SPRINTF(l[n].s, "HP n/a");
-    l[n++].col = kWhite;
-    if (g_monLevel >= 0 && mi.state[0] && n < max) SPRINTF(l[n].s, "move: %s", mi.state), l[n++].col = kWhite;
-    if (g_monLevel >= 1 && it.kind == MK_MONSTER && n < max) {
+    const bool *sh = g_monShow;
+    if (sh[MF_NAME]) {
+        SPRINTF(l[n].s, "%s%s", mi.name, (g_monFreeze && it.kind == MK_MONSTER) ? " [frozen]" : "");
+        l[n++].col = (g_monFreeze && it.kind == MK_MONSTER) ? kFrozen : kWhite;
+    }
+    if ((sh[MF_HP] || sh[MF_LEVEL]) && n < max) {
+        if (!mi.stats) {
+            if (sh[MF_HP]) SPRINTF(l[n].s, "HP n/a"), l[n++].col = kWhite;
+        } else {
+            if (sh[MF_HP] && sh[MF_LEVEL]) SPRINTF(l[n].s, "%.0f/%d HP  lvl %d", mi.hp, mi.maxHp, mi.level);
+            else if (sh[MF_HP]) SPRINTF(l[n].s, "%.0f/%d HP", mi.hp, mi.maxHp);
+            else SPRINTF(l[n].s, "lvl %d", mi.level);
+            l[n++].col = kWhite;
+        }
+    }
+    if (sh[MF_MOVE] && mi.state[0] && n < max) SPRINTF(l[n].s, "move: %s", mi.state), l[n++].col = kWhite;
+    if (sh[MF_AI] && it.kind == MK_MONSTER && n < max) {
         if (mi.beh[0]) SPRINTF(l[n].s, "AI: %s%s%s", mi.beh, mi.sub[0] ? ": " : "", mi.sub);
         else SPRINTF(l[n].s, "AI: -");
         l[n++].col = kWhite;
     }
-    if (g_monLevel >= 2 && it.kind == MK_MONSTER && n < max)
+    if (sh[MF_COOLDOWNS] && it.kind == MK_MONSTER && n < max)
         SPRINTF(l[n].s, "cooldowns: %s", mi.coolN ? mi.cool : "-"), l[n++].col = kWhite;
-    if (g_monLevel >= 3 && n < max) {
+    if (sh[MF_TARGET] && n < max) {
         if (mi.target[0]) SPRINTF(l[n].s, "target: %s (%.0f units, ~%.1f m)", mi.target, mi.targetDist,
                                     mi.targetDist / um);
         else SPRINTF(l[n].s, "target: -");
         l[n++].col = kWhite;
-        if (mi.stats && n < max)
-            SPRINTF(l[n].s, "damage %d  defense %d  resistance %d", mi.damage, mi.defense, mi.resist), l[n++].col = kWhite;
-        if (n < max) SPRINTF(l[n].s, "pos (%.0f %.0f %.0f)", it.pos.x, it.pos.y, it.pos.z), l[n++].col = kDim;
     }
-    if (g_monDamage && n < max) {
+    if (sh[MF_STATS] && mi.stats && n < max)
+        SPRINTF(l[n].s, "damage %d  defense %d  resistance %d", mi.damage, mi.defense, mi.resist), l[n++].col = kWhite;
+    if (sh[MF_POS] && n < max) SPRINTF(l[n].s, "pos (%.0f %.0f %.0f)", it.pos.x, it.pos.y, it.pos.z), l[n++].col = kDim;
+    if (sh[MF_HITS] && g_monDamage && n < max) {
         DmgEnt *e = DmgOf(it.obj, false);
-        if (e && e->hits && (panel || GetTickCount() - e->at < 4000)) {
+        if (e && e->hits && GetTickCount() - e->at < 4000) {
             SPRINTF(l[n].s, "hit -%.0f (%.1f s ago)  total -%.0f in %d", e->last, (GetTickCount() - e->at) / 1000.0f,
                       e->total, e->hits);
             l[n++].col = kHit;
-        } else if (panel) {
-            SPRINTF(l[n].s, "no hits yet");
-            l[n++].col = kDim;
         }
     }
     return n;
@@ -1233,7 +1277,8 @@ static void DrawLabels(ImDrawList *dl, const int *order, int count)
         ReadInfo(it, mi);
         DmgUpdate(it, mi);
         Line lines[10];
-        int n = BuildLines(it, mi, lines, 10, false);
+        int n = BuildLines(it, mi, lines, 10);
+        if (n == 0) continue;  // task 12: every line of this label is off (or has nothing now) - no empty box
         float w = 0;
         for (int i = 0; i < n; i++) w = fmaxf(w, font->CalcTextSizeA(fsz, FLT_MAX, 0, lines[i].s).x);
         Rect r = {it.sx - w * 0.5f - 3, it.sy - n * lh - 4, it.sx + w * 0.5f + 3, it.sy};
@@ -1325,10 +1370,14 @@ static void DrawTargetPanel(int ti)
     float wrap = fmaxf(fs * 14.0f, s_W * 0.38f - ImGui::GetStyle().WindowPadding.x * 2);  // keep off the centre
     ImGui::PushTextWrapPos(wrap);
     ImGui::TextColored(ImVec4(1.0f, 0.80f, 0.30f, 1.0f), "info: target");
-    ImGui::SameLine();
-    ImGui::TextDisabled("%s", kLevelTitle[g_monLevel & 3]);
     if (ti < 0) {
         ImGui::TextDisabled("no monster in the centre of the screen");
+        ImGui::PopTextWrapPos();
+        ImGui::End();
+        return;
+    }
+    if (!AnyPanelLine()) {  // task 12: the corners still show which one it is
+        ImGui::TextDisabled("all lines are off (Monsters > Display)");
         ImGui::PopTextWrapPos();
         ImGui::End();
         return;
@@ -1337,34 +1386,42 @@ static void DrawTargetPanel(int ti)
     MInfo mi;
     ReadInfo(it, mi);
     DmgUpdate(it, mi);
-    ImGui::Text("%s", mi.name);
-    if (g_monFreeze && it.kind == MK_MONSTER) {
-        ImGui::SameLine();
-        ImGui::TextColored(ImVec4(0.43f, 0.86f, 1.0f, 1.0f), "[frozen]");
+    const bool *sh = g_monShow;  // task 12: the Display switches, the order of the lines as in task 11
+    if (sh[MF_NAME]) {
+        ImGui::Text("%s", mi.name);
+        if (g_monFreeze && it.kind == MK_MONSTER) {
+            ImGui::SameLine();
+            ImGui::TextColored(ImVec4(0.43f, 0.86f, 1.0f, 1.0f), "[frozen]");
+        }
     }
-    ImGui::TextDisabled("class %s%s%s  (%s)", mi.cls, mi.obj[0] ? "  object " : "", mi.obj,
-                        it.kind == MK_MONSTER ? "monster" : it.kind == MK_NPC ? "NPC" : "player");
+    if (sh[MF_CLASS])
+        ImGui::TextDisabled("class %s%s%s  (%s)", mi.cls, mi.obj[0] ? "  object " : "", mi.obj,
+                            it.kind == MK_MONSTER ? "monster" : it.kind == MK_NPC ? "NPC" : "player");
     if (mi.stats) {
         float frac = mi.maxHp > 0 ? mi.hp / mi.maxHp : 0;
-        ImGui::Text("HP %.0f / %d (%.0f%%)%s", mi.hp, mi.maxHp, frac * 100.0f, mi.maxOk ? "" : " (base max)");
-        ImGui::Text("level %d   damage %d   defense %d   resistance %d", mi.level, mi.damage, mi.defense, mi.resist);
-    } else {
+        if (sh[MF_HP]) ImGui::Text("HP %.0f / %d (%.0f%%)%s", mi.hp, mi.maxHp, frac * 100.0f, mi.maxOk ? "" : " (base max)");
+        if (sh[MF_LEVEL] && sh[MF_STATS])
+            ImGui::Text("level %d   damage %d   defense %d   resistance %d", mi.level, mi.damage, mi.defense, mi.resist);
+        else if (sh[MF_LEVEL]) ImGui::Text("level %d", mi.level);
+        else if (sh[MF_STATS]) ImGui::Text("damage %d   defense %d   resistance %d", mi.damage, mi.defense, mi.resist);
+    } else if (sh[MF_HP] || sh[MF_LEVEL] || sh[MF_STATS]) {
         ImGui::TextDisabled("HP / stats: n/a");
     }
-    ImGui::Text("move: %s", mi.state[0] ? mi.state : "-");
+    if (sh[MF_MOVE]) ImGui::Text("move: %s", mi.state[0] ? mi.state : "-");
     if (it.kind == MK_MONSTER) {
-        if (g_monLevel >= 1) ImGui::Text("AI: %s%s%s", mi.beh[0] ? mi.beh : "-", mi.sub[0] ? ": " : "", mi.sub);
-        if (g_monLevel >= 2) ImGui::Text("cooldowns: %s", mi.coolN ? mi.cool : "-");
-        if (g_monLevel >= 3) {
+        if (sh[MF_AI]) ImGui::Text("AI: %s%s%s", mi.beh[0] ? mi.beh : "-", mi.sub[0] ? ": " : "", mi.sub);
+        if (sh[MF_COOLDOWNS]) ImGui::Text("cooldowns: %s", mi.coolN ? mi.cool : "-");
+        if (sh[MF_TARGET]) {
             if (mi.target[0]) ImGui::Text("target: %s (%.0f units, ~%.1f m)", mi.target, mi.targetDist,
                                           mi.targetDist / kUnitsPerM);
             else ImGui::Text("target: -");
         }
     }
-    ImGui::TextDisabled("distance %.0f units (%.1f m)  angle %.1f deg  top %.0f", it.dist, it.dist / kUnitsPerM,
-                        it.aim, it.height);
-    if (g_monLevel >= 3) ImGui::TextDisabled("pos (%.1f %.1f %.1f)", it.pos.x, it.pos.y, it.pos.z);
-    if (g_monDamage) {
+    if (sh[MF_DIST])
+        ImGui::TextDisabled("distance %.0f units (%.1f m)  angle %.1f deg  top %.0f", it.dist, it.dist / kUnitsPerM,
+                            it.aim, it.height);
+    if (sh[MF_POS]) ImGui::TextDisabled("pos (%.1f %.1f %.1f)", it.pos.x, it.pos.y, it.pos.z);
+    if (sh[MF_HITS] && g_monDamage) {
         DmgEnt *e = DmgOf(it.obj, false);
         if (e && e->hits) ImGui::TextColored(ImVec4(1.0f, 0.63f, 0.24f, 1.0f), "hit -%.0f (%.1f s ago)  total -%.0f in %d hits",
                                              e->last, (GetTickCount() - e->at) / 1000.0f, e->total, e->hits);
@@ -1383,11 +1440,13 @@ static void DrawSummary(bool full)
     ImGui::SetNextWindowBgAlpha(0.55f);
     ImGui::Begin("##dbgmonsum", NULL, kPanel);
     ImGui::SetWindowFontScale(0.8f);
-    if (full) ImGui::Text("monsters %s  Monsters: %d", kLevelTitle[g_monLevel & 3], s_st.monsters);
+    if (full) ImGui::Text("monsters  Monsters: %d", s_st.monsters);
     else ImGui::Text("monsters");
     ImGui::SameLine();
     if (!full) {
         ImGui::TextDisabled("info off");
+    } else if (g_monNearby && !AnyLabelLine()) {  // task 12
+        ImGui::TextDisabled("labels: all lines off (Display)");
     } else if (g_monNearby) {
         char range[24];
         if (kRangeM[g_monRange]) SPRINTF(range, "%.0f m", kRangeM[g_monRange]);
@@ -1396,7 +1455,7 @@ static void DrawSummary(bool full)
     } else {
         ImGui::TextDisabled("labels off");
     }
-    if (full && g_monLevel >= 3) {
+    if (full) {  // task 11: only on the Xbox level 4; task 12: always (one short line)
         ImGui::SameLine();
         ImGui::TextDisabled("Characters: %d (NPC %d, player %d)", s_st.chars, s_st.npcs, s_st.players);
     }
@@ -1555,7 +1614,7 @@ static void DrawInner()
     }
     ImDrawList *dl = ImGui::GetBackgroundDrawList();
     if (no > 1) qsort(order, no, sizeof(int), CmpDist);
-    if (g_monNearby && s_viewOk) DrawLabels(dl, order, no);
+    if (g_monNearby && s_viewOk && AnyLabelLine()) DrawLabels(dl, order, no);
     if (ti >= 0) DrawTargetMark(dl, s_items[ti]);
     if (g_monTarget) DrawTargetPanel(s_viewOk ? ti : -1);
     DrawSummary(true);
@@ -1575,10 +1634,10 @@ static void DrawInner()
         if (LogBudget(&s_statsBudget, 300))
             Log("monsters: %d characters (monsters %d, NPC %d, players %d), listed %d, in range %d, labels %d (skipped "
                 "%d) | target %s | collect %.3f ms avg (max %.3f) | draw %.3f ms avg (max %.3f) over %d frames | "
-                "level %d, range %s, freeze %d, damage %d",
+                "display %s, range %s, freeze %d, damage %d",
                 s_st.chars, s_st.monsters, s_st.npcs, s_st.players, s_numItems, s_st.inRange, s_st.drawn,
                 s_st.overlap, s_target ? s_targetName : "-", s_frames ? s_collectMs / s_frames : 0, s_collectMax,
-                s_frames ? s_drawMs / s_frames : 0, s_drawMax, s_frames, g_monLevel + 1,
+                s_frames ? s_drawMs / s_frames : 0, s_drawMax, s_frames, ShowText(),
                 kRangeM[g_monRange] ? "limited" : "unlimited", g_monFreeze, g_monDamage);
         s_statsTick = GetTickCount();
         s_collectMs = s_drawMs = s_collectMax = s_drawMax = 0;
@@ -1607,8 +1666,8 @@ void Mon_Draw2D()
         s_statsTick = GetTickCount();
         s_collectMs = s_drawMs = s_collectMax = s_drawMax = 0;
         s_frames = 0;
-        Log("monsters: info ON: nearby %d target %d, level %d, range %.0f m (0 = unlimited), show %d", g_monNearby,
-            g_monTarget, g_monLevel + 1, kRangeM[g_monRange], g_monWho);
+        Log("monsters: info ON: nearby %d target %d, display %s, range %.0f m (0 = unlimited), show %d", g_monNearby,
+            g_monTarget, ShowText(), kRangeM[g_monRange], g_monWho);
     }
     __try {
         DrawInner();
@@ -1647,11 +1706,11 @@ void Mon_TestControl(int cmd)
         bool ok = s_viewOk && Project(top, &x, &y);
         Log("test: monsters check: view %d, first monster anchor -> %s (%.1f %.1f) of %.0fx%.0f | listed %d, in range %d, "
             "labels %d, skipped %d | target %s | update flag %u | options DamageIndicators %u, profile %u | player HP %.0f"
-            " | items: nearby %d target %d level %d range %d show %d damage %d freeze %d | last collect %.3f ms, "
+            " | items: nearby %d target %d display %s range %d show %d damage %d freeze %d | last collect %.3f ms, "
             "draw %.3f ms",
             s_viewOk, ok ? "screen" : "off screen", x, y, s_W, s_H, s_numItems, s_st.inRange, s_st.drawn, s_st.overlap,
             s_target ? s_targetName : "-", s_fakeFlag, s_fakeOpt[OFS_OPT_DAMAGEIND], s_fakeOptBlock, s_fakePlayerHp,
-            g_monNearby, g_monTarget, g_monLevel + 1, g_monRange, g_monWho, g_monDamage, g_monFreeze, s_lastCollect,
+            g_monNearby, g_monTarget, ShowText(), g_monRange, g_monWho, g_monDamage, g_monFreeze, s_lastCollect,
             s_lastDraw);
         LogFields("test check");
         break;

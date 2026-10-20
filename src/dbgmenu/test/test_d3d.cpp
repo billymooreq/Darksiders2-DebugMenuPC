@@ -162,7 +162,7 @@ int main()
 
     g_ctl = (DbgMenuTest_t)GetProcAddress(dll, "DbgMenuTest");
     printf("DbgMenuTest export %p\n", (void *)g_ctl);
-    for (int frame = 1; frame <= 1800; frame++) {
+    for (int frame = 1; frame <= 1862; frame++) {
         MSG msg;
         while (PeekMessageA(&msg, NULL, 0, 0, PM_REMOVE)) {
             TranslateMessage(&msg);
@@ -516,28 +516,35 @@ int main()
         case 1676: Say("11b: info: nearby on (level 1, 30 m)"); Key(VK_RETURN); break;
         case 1677: Key(VK_F1); break;
         case 1680: Ctl(18); Snapshot("shot51.bmp"); break;
-        case 1682: Say("11b: info level 1 -> 4"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        // task 12: Monsters = nearby, target, range, show, Display >, damage, freeze; Display = name, class, HP,
+        // level, stats, move, AI, cooldowns, target, distance, pos, hits, all on, all off (no info level any more)
+        case 1682: Say("11b: Display > all on (was info level 4)"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_UP); Key(VK_RETURN); Key(VK_ESCAPE); break;
         case 1683: Key(VK_F1); break;
         case 1686: Snapshot("shot52.bmp"); Ctl(18); break;
-        case 1688: Say("11c: nearby range 30 m -> unlimited: Skel_Far gets a label"); Key(VK_F1); Key(VK_DOWN); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        case 1688: Say("11c: nearby range 30 m -> unlimited: Skel_Far gets a label"); Key(VK_F1); Key(VK_UP); Key(VK_UP); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); Key(VK_RIGHT); break;
         case 1689: Key(VK_F1); break;
         case 1692: Snapshot("shot53.bmp"); Ctl(18); break;
-        case 1694: Say("11c: back to 30 m, level 2"); Key(VK_F1); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_UP); Key(VK_LEFT); Key(VK_LEFT); break;
+        case 1694: Say("11c: back to 30 m; Display: all off, then name HP move AI (was level 2)"); Key(VK_F1);
+            Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_LEFT); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN);
+            Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN);
+            Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_ESCAPE); break;
         case 1695: Key(VK_F1); break;
         case 1696: Say("11d: F5 -> info: target on (the monster in the centre)"); Key(VK_F5); break;
         case 1700: Snapshot("shot54.bmp"); Ctl(18); break;
-        case 1702: Say("11e: show: monsters + NPC, all characters"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RIGHT); Key(VK_RIGHT); break;
+        case 1702: Say("11e: show: monsters + NPC, all characters"); Key(VK_F1); Key(VK_UP); Key(VK_RIGHT); Key(VK_RIGHT); break;
         case 1703: Key(VK_F1); break;
         case 1705: Snapshot("shot55.bmp"); Ctl(18); break;
         case 1707: Key(VK_F1); Key(VK_LEFT); Key(VK_LEFT); break;
         case 1708: Key(VK_F1); break;
-        case 1710: Say("11f: damage info on, two hits of 25 on Skel_A01"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1710: Say("11f: damage info on + Display > hits, two hits of 25 on Skel_A01"); Key(VK_F1); Key(VK_DOWN);
+            Key(VK_DOWN); Key(VK_RETURN); Key(VK_UP); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN);
+            Key(VK_DOWN); Key(VK_RETURN); Key(VK_ESCAPE); break;
         case 1711: Key(VK_F1); break;
         case 1713: Ctl(19); break;
         case 1716: Ctl(19); break;
         case 1718: Snapshot("shot56.bmp"); Ctl(18); break;
         case 1719: Say("11f: the game saves its options: the profile keeps 0, the live value stays 1"); Ctl(24); break;
-        case 1720: Say("11g: freeze monsters on"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1720: Say("11g: freeze monsters on"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
         case 1721: Key(VK_F1); break;
         case 1723: Snapshot("shot57.bmp"); Ctl(18); break;
         case 1724: Say("11h: freeze + flight with time frozen, then exit: the flag stays 0"); Key(VK_F2); break;
@@ -579,8 +586,57 @@ int main()
         case 1790: Say("11n: back to the defaults (F5 opens the menu now)"); Key(VK_F5); Key(VK_RETURN); break;
         case 1791: Key(VK_F1); break;
         case 1792: Ctl(16); PrintFile(); break;
-        case 1794: Say("final: F10 off"); SysKey(VK_F10); Ctl(18); break;
-        case 1798: Say("final cursor state: released"); Ctl(6); break;
+        case 1794: Say("11: F10 off"); SysKey(VK_F10); Ctl(18); break;
+        // ---- task 12: sub-folder Monsters > Display (fake monsters of task 11) ----
+        case 1800: Say("12a: F10 on; Main > Monsters > Display: the path in the header"); SysKey(VK_F10); Ctl(17); break;
+        case 1802: Key(VK_F1); Key(VK_ESCAPE); Key(VK_UP); Key(VK_UP); Key(VK_UP); Key(VK_RETURN);  // Keys -> Monsters
+            for (int i = 0; i < 6; i++) Key(VK_UP);  // freeze -> info: nearby
+            Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1804: Snapshot("shot63.bmp"); break;
+        case 1805: Say("12b: Esc - back to Monsters, the cursor on Display"); Key(VK_ESCAPE); break;
+        case 1807: Snapshot("shot64.bmp"); break;
+        case 1808: Say("12c: Enter - Display at the remembered row (hits); all off -> no labels"); Key(VK_RETURN); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1810: Snapshot("shot65.bmp"); Ctl(18); break;
+        case 1811: Say("12d: F1 closes inside the folder, F1 opens it there again"); Key(VK_F1); break;
+        case 1812: Key(VK_F1); break;
+        case 1814: Snapshot("shot66.bmp"); break;
+        case 1815: Say("12e: name on: labels with the name only; F5: the panel"); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1816: Key(VK_F1); break;
+        case 1817: Key(VK_F5); break;
+        case 1819: Snapshot("shot67.bmp"); Ctl(18); break;
+        case 1820: Say("12e: + class (panel only), HP, level"); Key(VK_F1); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1821: Key(VK_F1); break;
+        case 1823: Snapshot("shot68.bmp"); break;
+        case 1824: Say("12e: + stats, move, AI, cooldowns"); Key(VK_F1);
+            for (int i = 0; i < 4; i++) Key(VK_DOWN), Key(VK_RETURN);
+            break;
+        case 1825: Key(VK_F1); break;
+        case 1827: Snapshot("shot69.bmp"); break;
+        case 1828: Say("12e: + target, distance (panel only), position, hits (damage info off: no hit line)"); Key(VK_F1);
+            for (int i = 0; i < 4; i++) Key(VK_DOWN), Key(VK_RETURN);
+            break;
+        case 1829: Key(VK_F1); break;
+        case 1831: Snapshot("shot70.bmp"); Ctl(18); break;
+        case 1832: Say("12f: Left on a switch = off (not back), Right = on"); Key(VK_F1); Key(VK_LEFT); break;
+        case 1834: Key(VK_RIGHT); break;
+        case 1835: Key(VK_F1); break;
+        case 1836: Say("12g: all off: no labels, the panel says so"); Key(VK_F1); Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1837: Key(VK_F1); break;
+        case 1839: Snapshot("shot71.bmp"); Ctl(18); break;
+        case 1840: Say("12h: all on; Left on an action = back; damage info on + a hit: the hit line"); Key(VK_F1); Key(VK_UP);
+            Key(VK_RETURN); Key(VK_LEFT); Key(VK_DOWN); Key(VK_RETURN); break;
+        case 1841: Key(VK_F1); break;
+        case 1843: Ctl(19); break;
+        case 1845: Snapshot("shot72.bmp"); Ctl(18); break;
+        case 1846: Say("12i: damage info off; the defaults back (all off + name + HP, Right opens the folder); Esc Esc: Main");
+            Key(VK_F1); Key(VK_RETURN); Key(VK_UP); Key(VK_RIGHT); Key(VK_DOWN); Key(VK_RETURN); Key(VK_DOWN); Key(VK_RETURN);
+            Key(VK_DOWN); Key(VK_DOWN); Key(VK_RETURN); Key(VK_ESCAPE); Key(VK_ESCAPE); break;
+        case 1848: Snapshot("shot73.bmp"); Ctl(18); break;
+        case 1850: Key(VK_F1); break;
+        case 1851: Say("12i: F1 opens at Main (Monsters)"); Key(VK_F1); break;
+        case 1853: Key(VK_F1); break;
+        case 1856: Say("final: F10 off"); SysKey(VK_F10); Ctl(18); break;
+        case 1860: Say("final cursor state: released"); Ctl(6); break;
         }
         g_dev->Clear(0, NULL, D3DCLEAR_TARGET | D3DCLEAR_ZBUFFER, D3DCOLOR_XRGB(60, 90, 130), 1.0f, 0);
         g_dev->BeginScene();

@@ -1,4 +1,4 @@
-# Дебаг-меню (DLL v0.7–v0.10, задачи 08–11): устройство и как расширять
+# Дебаг-меню (DLL v0.7–v0.11, задачи 08–12): устройство и как расширять
 
 Код — `src\dbgmenu\menu.cpp` (реестр, клавиши меню, отрисовка, панель showCameraPosition), `keys.cpp` (с v0.9: F10, назначаемые клавиши, `dbgmenu_keys.ini`). Горячие клавиши ловит WndProc в `input.cpp` (`Keys_HotkeyNow` → `RunHotkey`), меню получает клавиши из очереди (`Input_PopKey` → `Menu_HandleKey`, поток рендера = поток игры): обычный vk — навигация, `KQ_ACTION|действие` — горячая клавиша уже выполнена (только лог), `KQ_CAPTURE|vk` — клавиша для раздела Keys.
 
@@ -16,12 +16,14 @@ Main
     Show triggers (shortcut F3) [off]            g_showTriggers (по умолч. off)
     depth                     < through walls | depth >  g_trigDepthMode (по умолч. through walls)
     show disabled             [on]               g_trigShowDisabled (по умолч. on)
-> Monsters             7 >   (v0.10, задача 11, notes/monsters_pc.md)
+> Monsters             7 >   (v0.10, задача 11; v0.11, задача 12 — info level → папка Display; notes/monsters_pc.md)
     info: nearby              [off]              g_monNearby (подписи над мобами)
     info: target (shortcut F5) [off]             g_monTarget (панель моба в центре экрана)
-    info level                < 1 Move states | 2 Move & Script states | 3 Move, Script & Cooldowns | 4 Everything >  g_monLevel 0..3
     nearby range              < 10 m … 30 m … 150 m | unlimited >  g_monRange (по умолч. 30 m)
     show                      < monsters | monsters + NPC | all characters >  g_monWho
+    Display              14 >   ПАПКА (CT_FOLDER, категория строк "Monsters/Display"), g_monShow[MF_*]
+        name [on] · class (target only) [off] · HP [on] · level · damage / defense / resistance · move state ·
+        AI behaviour · cooldowns · target · distance (target only) · position · hits [off] · all on · all off
     damage info               [off]              g_monDamage (опция игры DamageIndicators, пока on)
     freeze monsters           [off]              g_monFreeze (байт 0x014D4278 = 0)
 > Camera               1 >
@@ -41,14 +43,18 @@ Main
 - `CT_TOGGLE` — Enter переключает, влево/вправо = off/on, после изменения — `action` (обычно `Menu_Status`);
 - `CT_FLOAT` — влево/вправо ± step в пределах [min, max];
 - `CT_ENUM` — влево/вправо по кругу, Enter — следующее; статус «Раздел > пункт: значение», затем `action`.
+- `CT_FOLDER` (v0.11) — папка: строка «Имя  N >», Enter/вправо — войти, влево/Esc/Backspace — на уровень выше;
+- `CT_TOGGLE` с `action == NULL` (v0.11) — статус сам: «Раздел > папка > пункт: on».
 `key` (с v0.9, было `const char *shortcut`) — действие `KeyAction`: у CT_ACTION/CT_TOGGLE — подпись « (shortcut X)» с текущей клавишей; у `CT_KEY` (раздел Keys) — какое действие переназначает пункт. Сама клавиша — `keys.cpp` + `input.cpp` (`RunHotkey`), строка в `Menu_HandleKey` для лога. В `desc` — токены `{fly}` и т. п. (§6).
 
 **Новый пункт:** одна строка в `g_commands[]` с именем раздела своей функции (рядом с остальными строками раздела — порядок строк = порядок пунктов). Переменная — `extern` в `common.h` в блоке своего модуля.
 **Новый раздел:** строки с новым именем раздела там, где раздел должен стоять в списке (порядок разделов = порядок первого появления в реестре; максимум 16 разделов, 64 пункта в разделе). Больше ничего менять не нужно: счётчик « N >», навигация и запоминание курсора работают сами.
+**Новая подпапка (v0.11):** (1) в разделе — строка `{"Раздел", "Имя", "описание", CT_FOLDER, NULL, NULL, NULL, 0, 0, 0, KA_NONE}` там, где папка должна стоять; (2) её пункты — строки с категорией **`"Раздел/Имя"`** (порядок строк = порядок пунктов). Вложенность любая: `"Раздел/Имя/Под"` + строка CT_FOLDER «Под» с категорией `"Раздел/Имя"`. Категория со `/` в список разделов не попадает. Путь в шапке/статусе/логе — `PathText` (`/` → ` > `). Длина пути ≤ 95 символов, до 64 пунктов в папке, до 32 запомненных путей (разделы + папки).
 
 ## 3. Курсор и навигация
-- `s_level` (0 — список разделов, 1 — пункты), `s_cat`, `s_itemSel[16]` (свой выбранный пункт у каждого раздела) — статические, при закрытии **не сбрасываются** → F1 открывает меню там, где закрыли (в пределах запуска игры; в файл не сохраняется).
-- Разделы: вверх/вниз, Enter/вправо — войти, Esc/Backspace — закрыть. Пункты: вверх/вниз, Enter, влево/вправо, Esc/Backspace — назад к разделам.
+- `s_level` (0 — список разделов, 1 — пункты `s_path`), `s_cat` (раздел в Main), **`s_path`** (v0.11: `"Monsters"` или `"Monsters/Display"`), **`SelOf(path)`** — выбранная строка каждого раздела/папки (таблица `s_selMem[32]` по строке пути; было `s_itemSel[16]` по номеру раздела) — статические, при закрытии **не сбрасываются** → F1 открывает меню там, где закрыли, в т. ч. внутри папки (в пределах запуска игры; в файл не сохраняется).
+- Разделы: вверх/вниз, Enter/вправо — войти, Esc/Backspace — закрыть. Пункты: вверх/вниз, Enter, влево/вправо, Esc/Backspace — **на уровень выше** (`GoBack`: из папки — в родителя, курсор на строке папки; из раздела — в Main). Влево на действии / клавише / папке — тоже назад; на переключателе — off.
+- Шапка: `Main > Monsters > Display`; подсказка внизу: `Enter run/open`.
 - Лог: `menu: opened at <Раздел[ > пункт]>`, `closed at …`, `open …`, `back to …`, `execute Раздел/пункт`, `Раздел > пункт = 0.75` (числа), статусы переключателей.
 
 ## 4. Офлайн-тест (test_d3d, кадры 1270–1320, снимки shot21–29)
@@ -79,3 +85,9 @@ Main
 - **F10 off** дополнительно: `Mon_OnDebugOff()` — nearby/target/damage/freeze off, флаги игры назад; лог `| monsters info off | freeze monsters off | damage info off`.
 - Сводка Monsters — внизу слева над строкой триггеров (при включённых триггерах поднимается на 1.45 строки); панель цели — справа с 40 % высоты.
 - Офлайн-тест: старые сценарии — навигация к Camera +1 «вниз» (кадры 8, 1292, 1540), к Triggers от Menu +1 «вверх» (1304), Keys > reset +1 «вниз» (1643); в 10d/10e клавиша F5 заменена на F6 (F5 теперь info: target). Новые 11a–11n — `monsters_pc.md` §4. Особенность теста: клавиши меню читает следующий кадр оверлея, а F1 срабатывает сразу — закрывать меню надо отдельным кадром.
+
+## 8. v0.11 (задача 12): подпапки, Monsters > Display
+- Движок: `CT_FOLDER`, `s_path`, `SelOf`, `OpenPath`/`GoBack`, `PathText`, `FolderPath`, `ToggleDone` (§2–§3). Лог: `menu: open Monsters > Display > hits`, `back to Monsters > Display`, `closed at Monsters > Display > all off`, `execute Monsters/Display/HP`, `Monsters > Display > HP: on`.
+- Раздел Monsters: пункт info level убран, на его месте по смыслу (после nearby range / show) — папка **Display** (дерево в §1, устройство полей — `monsters_pc.md` §9). Число пунктов раздела не изменилось (7): индексы damage info (5) и freeze (6) те же.
+- Офлайн-тест (кадры 1682–1720 переписаны под Display; новые 12a–12i — кадры 1800–1860, снимки shot63–73): путь в шапке, Esc → Monsters с курсором на Display, Enter → снова на запомненной строке (hits), F1 закрывает/открывает внутри папки, поля по одному (name → +class/HP/level → +stats/move/AI/cooldowns → +target/distance/pos/hits), влево на переключателе = off (не назад), all off → подписей 0, панель «all lines are off», all on, влево на действии = назад, damage info + удар → строка hits, вправо открывает папку, Esc Esc → Main, F1 открывает на Main. Старые сценарии 03–11 прошли.
+- Особенность ImGui (было и раньше): высота панели меню подстраивается со сдвигом в 1 кадр — на снимке сразу после перехода панель бывает выше/ниже нужного (в игре — 1 кадр).

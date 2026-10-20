@@ -3,6 +3,7 @@
 // toggles show their state, items with a hotkey show " (shortcut X)".
 // Task 10: everything is drawn only while the debug menu is on (F10; a small label at the top edge of the screen);
 // section Keys changes the hotkeys (keys.cpp); every key shown on screen is the current one ({menu} etc. below).
+// Task 12: sub-folders inside a section (CT_FOLDER, "Name  N >"; Enter goes in, Esc goes one level up).
 #include "common.h"
 #include <stdio.h>
 #include <stdarg.h>
@@ -14,13 +15,13 @@ volatile LONG g_keyCapture;
 static float s_panelAlpha = 0.80f;
 static float s_textScale = 1.00f;
 
-enum CmdType { CT_ACTION, CT_TOGGLE, CT_FLOAT, CT_ENUM, CT_KEY };
+enum CmdType { CT_ACTION, CT_TOGGLE, CT_FLOAT, CT_ENUM, CT_KEY, CT_FOLDER };
 struct Command {
-    const char *category;
+    const char *category;       // section, or a folder path inside it: "Monsters/Display" (task 12)
     const char *name;
     const char *desc;           // {debug} {menu} {fly} {triggers} {attach} {time} = the current key
     CmdType type;
-    void (*action)();  // CT_ACTION: run; CT_TOGGLE: called after the flag changed
+    void (*action)();  // CT_ACTION: run; CT_TOGGLE: called after the flag changed (NULL = a plain status line)
     bool *flag;        // CT_TOGGLE
     float *value;      // CT_FLOAT (Left/Right)
     float vmin, vmax, step;
@@ -44,12 +45,12 @@ static void On_MonNearby();
 static void On_MonTarget();
 static void On_MonDamage();
 static void On_MonFreeze();
+static void Cmd_MonAllOn();
+static void Cmd_MonAllOff();
 
 static const char *const kHoverJumpNames[] = {"game", "direct"};  // order of HJ_GAME / HJ_DIRECT
 static const char *const kTrigDepthNames[] = {"through walls", "depth"};  // order of TD_WALLS / TD_DEPTH
-// task 11: the Xbox showCharacterInfo levels (1..4), the nearby range (monsters.cpp kRangeM), who is shown (MW_*)
-static const char *const kMonLevelNames[] = {"1 Move states", "2 Move & Script states", "3 Move, Script & Cooldowns",
-                                             "4 Everything"};
+// task 11: the nearby range (monsters.cpp kRangeM), who is shown (MW_*)
 static const char *const kMonRangeNames[] = {"10 m", "20 m", "30 m", "50 m", "75 m", "100 m", "150 m", "unlimited"};
 static const char *const kMonWhoNames[] = {"monsters", "monsters + NPC", "all characters"};
 
@@ -61,7 +62,9 @@ static const char *const kMonWhoNames[] = {"monsters", "monsters + NPC", "all ch
 // Task 08: one category = one feature, all its settings inside it. Categories are shown in order of their first
 // appearance here, items in their order inside the category.
 //   new item    -> one line with the category of its feature (keep it next to the other lines of that category);
-//   new section -> lines with a new category name, placed where the section should appear (max 16 sections).
+//   new section -> lines with a new category name, placed where the section should appear (max 16 sections);
+//   new folder  -> a CT_FOLDER line "Name" in its section + lines with the category "Section/Name" (task 12; folders
+//                  can be nested: "Section/Name/Sub"; the rows of a folder are its lines in their order here).
 static const Command g_commands[] = {
     // ---- playerFly ----
     {"playerFly", "playerFly", "Allow player to float in the air for debugging. WASD + mouse fly, Shift x3, Ctrl x0.5, "
@@ -93,29 +96,63 @@ static const Command g_commands[] = {
      CT_ENUM, On_TrigDepth, NULL, NULL, 0, 0, 0, KA_NONE, &g_trigDepthMode, kTrigDepthNames, 2},
     {"Triggers", "show disabled", "Also draw the switched-off triggers (gray, paler).",
      CT_TOGGLE, On_ShowDisabled, &g_trigShowDisabled, NULL, 0, 0, 0, KA_NONE},
-    // ---- Monsters (task 11: Xbox AI showCharacterInfo / showCharacterDamageInfo / toggleMonsterUpdate) ----
-    {"Monsters", "info: nearby", "Labels over the monsters around (like the Xbox showCharacterInfo): name, HP and "
-     "level, then what the info level adds. How far: nearby range; nearest first, a label that would cover another "
-     "one moves up or is left out.",
+    // ---- Monsters (task 11: Xbox AI showCharacterInfo / showCharacterDamageInfo / toggleMonsterUpdate;
+    //      task 12: the Xbox info levels are replaced by the folder Display - one switch per line) ----
+    {"Monsters", "info: nearby", "Labels over the monsters around (like the Xbox showCharacterInfo); what they show: "
+     "Display. How far: nearby range; nearest first, a label that would cover another one moves up or is left out.",
      CT_TOGGLE, On_MonNearby, &g_monNearby, NULL, 0, 0, 0, KA_NONE},
-    {"Monsters", "info: target", "A panel on the right with everything about the monster in the centre of the "
-     "screen (the one the camera looks at, any distance; yellow corners mark it). {target} switches it.",
+    {"Monsters", "info: target", "A panel on the right about the monster in the centre of the screen (the one the "
+     "camera looks at, any distance; yellow corners mark it); what it shows: Display. {target} switches it.",
      CT_TOGGLE, On_MonTarget, &g_monTarget, NULL, 0, 0, 0, KA_TARGET},
-    {"Monsters", "info level", "The Xbox levels: 1 move state; 2 + AI behaviour (the script state); 3 + attack "
-     "cooldowns; 4 everything: + target and distance, damage / defense / resistance, position.",
-     CT_ENUM, NULL, NULL, NULL, 0, 0, 0, KA_NONE, &g_monLevel, kMonLevelNames, 4},
     {"Monsters", "nearby range", "How far from the camera the labels go (1 m is about 33 game units).",
      CT_ENUM, NULL, NULL, NULL, 0, 0, 0, KA_NONE, &g_monRange, kMonRangeNames, 8},
     {"Monsters", "show", "monsters: only enemies; + NPC: also the other characters; all: also the player.",
      CT_ENUM, NULL, NULL, NULL, 0, 0, 0, KA_NONE, &g_monWho, kMonWhoNames, 3},
+    {"Monsters", "Display", "What the labels (info: nearby) and the panel (info: target) show: one switch per line. "
+     "Enter - open, Esc - back.",
+     CT_FOLDER, NULL, NULL, NULL, 0, 0, 0, KA_NONE},
     {"Monsters", "damage info", "Like the Xbox showCharacterDamageInfo: the game's own damage numbers over the "
-     "enemies you hit (and the hit direction on the screen); the labels and the panel add the last hit and the "
-     "total. Only while on: your saved game settings are not changed.",
+     "enemies you hit (and the hit direction on the screen); Display > hits adds the last hit and the total to the "
+     "labels and the panel. Only while on: your saved game settings are not changed.",
      CT_TOGGLE, On_MonDamage, &g_monDamage, NULL, 0, 0, 0, KA_NONE},
     {"Monsters", "freeze monsters", "Like the Xbox toggleMonsterUpdate: the monsters stop - no moving, no attacks; "
      "the player and the rest of the world go on (you can hit them and walk around). Off: they go on from where "
      "they stopped. Also off by itself on a level load, the player's death and {debug} off.",
      CT_TOGGLE, On_MonFreeze, &g_monFreeze, NULL, 0, 0, 0, KA_NONE},
+    // ---- Monsters > Display (task 12): the lines of the labels and the panel, always in this order ----
+    {"Monsters/Display", "name", "The name of the monster (its object name in the level, else its script class); "
+     "[frozen] after it while freeze monsters is on.",
+     CT_TOGGLE, NULL, &g_monShow[MF_NAME], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "class (target only)", "The script class, the object name and the kind (monster / NPC / "
+     "player). Too long for a label: only in the info: target panel.",
+     CT_TOGGLE, NULL, &g_monShow[MF_CLASS], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "HP", "Health now / max (the panel adds %; \"base max\" while the game has not worked out "
+     "the max for the difficulty yet).",
+     CT_TOGGLE, NULL, &g_monShow[MF_HP], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "level", "The level of the monster (lvl N; next to HP when both are on).",
+     CT_TOGGLE, NULL, &g_monShow[MF_LEVEL], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "damage / defense / resistance", "Its attack damage, defense and resistance (one line).",
+     CT_TOGGLE, NULL, &g_monShow[MF_STATS], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "move state", "The movement state (Xbox level 1), e.g. MonsterIdle.",
+     CT_TOGGLE, NULL, &g_monShow[MF_MOVE], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "AI behaviour", "The AI behaviour and its current part (Xbox level 2, the script state), "
+     "e.g. base/tbehavior: Strafe. Monsters only.",
+     CT_TOGGLE, NULL, &g_monShow[MF_AI], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "cooldowns", "The attack cooldowns in seconds (Xbox level 3). Monsters only.",
+     CT_TOGGLE, NULL, &g_monShow[MF_COOLDOWNS], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "target", "Who the monster is after and how far it is (Xbox level 4).",
+     CT_TOGGLE, NULL, &g_monShow[MF_TARGET], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "distance (target only)", "Distance from the camera, the angle to the screen centre and "
+     "the height of its body. Only in the info: target panel.",
+     CT_TOGGLE, NULL, &g_monShow[MF_DIST], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "position", "The position in the world (x y z).",
+     CT_TOGGLE, NULL, &g_monShow[MF_POS], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "hits", "The last hit and the total (our own count by the HP going down). Only while "
+     "damage info is on.",
+     CT_TOGGLE, NULL, &g_monShow[MF_HITS], NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "all on", "Switch every line on.", CT_ACTION, Cmd_MonAllOn, NULL, NULL, 0, 0, 0, KA_NONE},
+    {"Monsters/Display", "all off", "Switch every line off (no labels then; the panel only says so).",
+     CT_ACTION, Cmd_MonAllOff, NULL, NULL, 0, 0, 0, KA_NONE},
     // ---- Camera ----
     {"Camera", "showCameraPosition", "Display the current position of the player and the camera.",
      CT_TOGGLE, On_ShowCameraPosition, &g_showCameraPosition, NULL, 0, 0, 0, KA_NONE},
@@ -143,12 +180,15 @@ static const Command g_commands[] = {
 };
 static const int kNumCommands = sizeof(g_commands) / sizeof(g_commands[0]);
 
-static const char *s_cats[16];
+static const char *s_cats[16];  // the sections (top-level categories, no '/')
 static int s_numCats;
 // Cursor: never reset when the menu closes, so F1 opens it where it was closed (for the whole game run).
-static int s_level;         // 0 = categories, 1 = items of s_cat
-static int s_cat;
-static int s_itemSel[16];   // remembered selection per category
+static int s_level;         // 0 = sections (Main), 1 = the rows of s_path
+static int s_cat;           // the section selected in Main
+static char s_path[96];     // task 12: the open section "Monsters" or a folder inside it "Monsters/Display"
+struct SelMem { char path[96]; int sel; };
+static SelMem s_selMem[32]; // the remembered row of every section / folder that was opened
+static int s_numSelMem;
 static char s_status[256];
 static DWORD s_statusUntil;
 
@@ -156,31 +196,79 @@ static void InitCategories()
 {
     if (s_numCats) return;
     for (int i = 0; i < kNumCommands; i++) {
+        if (strchr(g_commands[i].category, '/')) continue;  // a folder: its row is a CT_FOLDER line of the section
         int c = 0;
         while (c < s_numCats && strcmp(s_cats[c], g_commands[i].category) != 0) c++;
         if (c == s_numCats && s_numCats < 16) s_cats[s_numCats++] = g_commands[i].category;
     }
 }
 
-static int ItemsOf(int cat, const Command **out, int max)
+static int ItemsIn(const char *path, const Command **out, int max)
 {
     int n = 0;
     for (int i = 0; i < kNumCommands && n < max; i++)
-        if (strcmp(g_commands[i].category, s_cats[cat]) == 0) out[n++] = &g_commands[i];
+        if (strcmp(g_commands[i].category, path) == 0) out[n++] = &g_commands[i];
     return n;
 }
 
-// "Triggers" (section list) or "Triggers > depth" (items) - for the log
+// the path of the folder a CT_FOLDER row opens: "Monsters" + "Display" -> "Monsters/Display"
+static void FolderPath(const Command *c, char *out, int size) { sprintf_s(out, size, "%s/%s", c->category, c->name); }
+
+// the remembered row of a section / folder (0 the first time)
+static int &SelOf(const char *path)
+{
+    for (int i = 0; i < s_numSelMem; i++)
+        if (strcmp(s_selMem[i].path, path) == 0) return s_selMem[i].sel;
+    if (s_numSelMem == 32) return s_selMem[31].sel;  // never with today's registry: the last slot is shared then
+    SelMem &m = s_selMem[s_numSelMem++];
+    strcpy_s(m.path, path);
+    m.sel = 0;
+    return m.sel;
+}
+
+// "Monsters/Display" -> "Monsters > Display" (the header, the status line, the log)
+static const char *PathText(const char *path)
+{
+    static char buf[2][160];
+    static int k;
+    char *o = buf[k ^= 1];
+    int n = 0;
+    for (; *path && n < 150; path++) {
+        if (*path == '/') o[n++] = ' ', o[n++] = '>', o[n++] = ' ';
+        else o[n++] = *path;
+    }
+    o[n] = 0;
+    return o;
+}
+
+// "Triggers" (section list) or "Triggers > depth" / "Monsters > Display > HP" (rows) - for the log
 static const char *Where()
 {
-    static char buf[96];
+    static char buf[200];
     if (!s_numCats) return "-";
     if (s_level == 0) return s_cats[s_cat];
     const Command *items[64];
-    int n = ItemsOf(s_cat, items, 64);
-    int sel = s_itemSel[s_cat] < n ? s_itemSel[s_cat] : n - 1;
-    sprintf_s(buf, "%s > %s", s_cats[s_cat], sel >= 0 ? items[sel]->name : "-");
+    int n = ItemsIn(s_path, items, 64);
+    int sel = SelOf(s_path) < n ? SelOf(s_path) : n - 1;
+    sprintf_s(buf, "%s > %s", PathText(s_path), sel >= 0 ? items[sel]->name : "-");
     return buf;
+}
+
+// Enter on a section / on a CT_FOLDER row
+static void OpenPath(const char *path)
+{
+    strcpy_s(s_path, path);
+    s_level = 1;
+    Log("menu: open %s", Where());
+}
+
+// Esc / Backspace (Left on an action or a folder row): one level up - a folder -> its parent, a section -> Main
+static void GoBack()
+{
+    char *slash = strrchr(s_path, '/');
+    if (slash) *slash = 0;
+    else s_level = 0;
+    Log("menu: back to %s", Where());
 }
 
 // task 10: "{fly}" -> the current key of that action ("F2")
@@ -269,6 +357,16 @@ static void On_MonNearby() { Menu_Status("info: nearby %s", g_monNearby ? "on" :
 static void On_MonTarget() { Menu_Status("info: target %s", g_monTarget ? "on" : "off"); }
 static void On_MonDamage() { Menu_Status("damage info %s", g_monDamage ? "on" : "off"); }
 static void On_MonFreeze() { Menu_Status("freeze monsters %s", g_monFreeze ? "on" : "off"); }
+// task 12: Monsters > Display
+static void Cmd_MonAllOn() { Mon_ShowAll(true); Menu_Status("Monsters > Display: all on"); }
+static void Cmd_MonAllOff() { Mon_ShowAll(false); Menu_Status("Monsters > Display: all off"); }
+
+// task 12: a toggle without its own callback - "Monsters > Display > HP: on"
+static void ToggleDone(const Command *c)
+{
+    if (c->action) c->action();
+    else Menu_Status("%s > %s: %s", PathText(c->category), c->name, *c->flag ? "on" : "off");
+}
 
 static void Execute(const Command *c)
 {
@@ -278,13 +376,14 @@ static void Execute(const Command *c)
         break;
     case CT_TOGGLE:
         *c->flag = !*c->flag;
-        if (c->action) c->action();
+        ToggleDone(c);
         break;
     case CT_FLOAT:
+    case CT_FOLDER:  // opened by Menu_HandleKey
         break;
     case CT_ENUM:
         *c->choice = (*c->choice + 1) % c->numNames;
-        Menu_Status("%s > %s: %s", c->category, c->name, c->names[*c->choice]);
+        Menu_Status("%s > %s: %s", PathText(c->category), c->name, c->names[*c->choice]);
         if (c->action) c->action();
         break;
     case CT_KEY:  // task 10: the next key press goes to us (input.cpp)
@@ -298,18 +397,18 @@ static void Change(const Command *c, int dir)
 {
     if (c->type == CT_ENUM) {
         *c->choice = (*c->choice + c->numNames + dir) % c->numNames;
-        Menu_Status("%s > %s: %s", c->category, c->name, c->names[*c->choice]);
+        Menu_Status("%s > %s: %s", PathText(c->category), c->name, c->names[*c->choice]);
         if (c->action) c->action();
     } else if (c->type == CT_TOGGLE) {
         bool v = dir > 0;
         if (*c->flag != v) {
             *c->flag = v;
-            if (c->action) c->action();
+            ToggleDone(c);
         }
     } else if (c->type == CT_FLOAT) {
         float v = *c->value + dir * c->step;
         *c->value = v < c->vmin ? c->vmin : (v > c->vmax ? c->vmax : v);
-        Log("menu: %s > %s = %.2f", c->category, c->name, *c->value);
+        Log("menu: %s > %s = %.2f", PathText(c->category), c->name, *c->value);
     }
 }
 
@@ -362,8 +461,7 @@ void Menu_HandleKey(int vk)
         case VK_DOWN: s_cat = (s_cat + 1) % s_numCats; break;
         case VK_RETURN:
         case VK_RIGHT:
-            s_level = 1;
-            Log("menu: open %s", Where());
+            OpenPath(s_cats[s_cat]);
             break;
         case VK_ESCAPE:
         case VK_BACK:
@@ -375,32 +473,37 @@ void Menu_HandleKey(int vk)
     }
 
     const Command *items[64];
-    int n = ItemsOf(s_cat, items, 64);
-    int &sel = s_itemSel[s_cat];
+    int n = ItemsIn(s_path, items, 64);
+    int &sel = SelOf(s_path);
     if (n == 0) {
         s_level = 0;
         return;
     }
     if (sel >= n) sel = n - 1;
     const Command *c = items[sel];
+    char sub[96];
     switch (vk) {
     case VK_UP: sel = (sel + n - 1) % n; break;
     case VK_DOWN: sel = (sel + 1) % n; break;
     case VK_RETURN:
-        Log("menu: execute %s/%s", c->category, c->name);
-        Execute(c);
+    case VK_RIGHT:
+        if (c->type == CT_FOLDER) {  // task 12
+            FolderPath(c, sub, sizeof(sub));
+            OpenPath(sub);
+        } else if (vk == VK_RETURN) {
+            Log("menu: execute %s/%s", c->category, c->name);
+            Execute(c);
+        } else if (c->type != CT_ACTION && c->type != CT_KEY) {
+            Change(c, +1);
+        }
         break;
     case VK_LEFT:
-        if (c->type == CT_ACTION || c->type == CT_KEY) s_level = 0;
+        if (c->type == CT_ACTION || c->type == CT_KEY || c->type == CT_FOLDER) GoBack();
         else Change(c, -1);
-        break;
-    case VK_RIGHT:
-        if (c->type != CT_ACTION && c->type != CT_KEY) Change(c, +1);
         break;
     case VK_ESCAPE:
     case VK_BACK:
-        s_level = 0;
-        Log("menu: back to %s", Where());
+        GoBack();
         break;
     }
 }
@@ -447,7 +550,7 @@ static void DrawMenu()
     ImGui::TextColored(kTitle, "DEBUG MENU");
     ImGui::SameLine();
     ImGui::TextDisabled("Darksiders II PC");
-    ImGui::TextDisabled(s_level == 0 ? "Main" : "Main > %s", s_cats[s_cat]);
+    ImGui::TextDisabled(s_level == 0 ? "Main" : "Main > %s", PathText(s_path));
     ImGui::Separator();
 
     const char *desc = NULL;
@@ -455,13 +558,13 @@ static void DrawMenu()
         const Command *items[64];
         for (int c = 0; c < s_numCats; c++) {
             char cnt[16];
-            sprintf_s(cnt, "%d >", ItemsOf(c, items, 64));
+            sprintf_s(cnt, "%d >", ItemsIn(s_cats[c], items, 64));
             Row(c == s_cat, s_cats[c], cnt, kOff);
         }
     } else {
-        const Command *items[64];
-        int n = ItemsOf(s_cat, items, 64);
-        int sel = s_itemSel[s_cat] < n ? s_itemSel[s_cat] : n - 1;
+        const Command *items[64], *sub[64];
+        int n = ItemsIn(s_path, items, 64);
+        int sel = SelOf(s_path) < n ? SelOf(s_path) : n - 1;
         for (int i = 0; i < n; i++) {
             const Command *c = items[i];
             char label[128], value[64] = "";
@@ -479,6 +582,10 @@ static void DrawMenu()
             } else if (c->type == CT_ENUM) {
                 sprintf_s(value, "< %s >", c->names[*c->choice]);
                 col = kOn;
+            } else if (c->type == CT_FOLDER) {  // task 12: like a section row
+                char path[96];
+                FolderPath(c, path, sizeof(path));
+                sprintf_s(value, "%d >", ItemsIn(path, sub, 64));
             } else if (c->type == CT_KEY) {  // the ImGui font has no ellipsis: three dots
                 if (g_keyCapture == c->key) sprintf_s(value, "[press a key... (Esc - cancel)]");
                 else sprintf_s(value, "[%s]", Keys_KeyName(c->key));
@@ -508,7 +615,7 @@ static void DrawMenu()
     ImGui::PushTextWrapPos(0.0f);
     if (g_keyCapture) ImGui::TextDisabled("Press the new key  Esc cancel");
     else if (s_level == 0) ImGui::TextDisabled("Up/Down select  Enter open  Esc/%s close", Keys_KeyName(KA_MENU));
-    else ImGui::TextDisabled("Up/Down select  Enter run  Left/Right change  Esc back");
+    else ImGui::TextDisabled("Up/Down select  Enter run/open  Left/Right change  Esc back");
     ImGui::PopTextWrapPos();
     ImGui::End();
 }

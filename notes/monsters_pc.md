@@ -1,4 +1,4 @@
-# Раздел Monsters — DLL v0.10 … v0.10.2 (задача 11): showCharacterInfo / showCharacterDamageInfo / toggleMonsterUpdate
+# Раздел Monsters — DLL v0.10 … v0.10.2 (задача 11), v0.11 (задача 12: Display): showCharacterInfo / showCharacterDamageInfo / toggleMonsterUpdate
 
 Код: `src/dbgmenu/monsters.cpp` (сбор, поля, подписи, панель цели, флаги, лог, подделка для теста), пункты — `menu.cpp`, клавиша — `keys.cpp` / `input.cpp`, хуки опций — `hooks.cpp`, вид кадра и EventManager — `triggers.cpp` (`Trig_View`, `Trig_EventManagers`). Декомпиляция: Xbox `dumps/decomp_xbox/mon11a..f.c`, PC `dumps/decomp_pc/mon11a..g.c`. Таблица классов PC: `dumps/classes_pc.txt` (`scripts/pc_classes.py`).
 
@@ -36,7 +36,7 @@
 ## 3. Устройство v0.10
 - **Сбор** (с v0.10.2) — в кадре оверлея (Present = поток игры): миры (`Trig_Worlds`, как у триггеров) → **ActorManager** `0x004CF805(world)` → массив `+0x5C/+0x60` (элементы, `vt[0x1C]` → персонаж) и `+0x20/+0x24` (персонажи), без повторов. (v0.10–v0.10.1 брали EventManager `+0x8` — там только обработчики событий); на узел свой `__try`, длина ≤ count+64, указатель < 0x10000 — «плохой узел» без исключения. Класс — только если vt[4] — «чистый геттер» (`A1 xx xx xx xx C3` / `8B 81 disp32 C3` / `8B 41 disp8 C3`; иначе объект пропускается, лог раз на функцию), дескриптор с vt 0x0116228C; вид — по цепочке родителей (кэш по классу): Monster / NPC / Player. getPos вызывается только у 0x00885362 / 0x008EF6B2. Фильтр «show»: monsters / + NPC / all characters.
 - **Поля** (только у показанных): имя = имя объекта (`+0x50`), если оно есть и отличается от класса, иначе имя класса (класс скрипта, напр. Skeleton_Archer); статы `+0x330`; макс. HP — getMaxHealth, но **только если `actor+0x410` уже есть** (тогда вызов только читает), иначе база `+0x8C` («(base max)»); строки из игры копируются с усечением (`_snprintf_s/_TRUNCATE`, не CRT-проверки, которые закрывают игру). Имена Name → кэш на 2048 имён (поиск у игры — один раз на имя).
-- **Уровни** (как Xbox, но имя и HP — всегда): строка 1 — имя (+ `[frozen]`), строка 2 — `HP cur/max lvl N`; L1 `move: <состояние>`; L2 + `AI: AIBehavior: <часть>` (монстры); L3 + `cooldowns: …`; L4 + `target: <имя> (N units, ~M m)`, `damage/defense/resistance`, `pos`. При damage info — `hit -N (t s ago) total -N in K` (4 с после удара).
+- **Уровни (v0.10–v0.10.2; с v0.11 заменены папкой Display, §9)** (как Xbox, но имя и HP — всегда): строка 1 — имя (+ `[frozen]`), строка 2 — `HP cur/max lvl N`; L1 `move: <состояние>`; L2 + `AI: AIBehavior: <часть>` (монстры); L3 + `cooldowns: …`; L4 + `target: <имя> (N units, ~M m)`, `damage/defense/resistance`, `pos`. При damage info — `hit -N (t s ago) total -N in K` (4 с после удара).
 - **Подписи (info: nearby)** — над верхом капсулы (`pos.z + высота + 8`, высоты нет → 150), проекция — матрицы кадра из хука 0x00983AFC (как у триггеров: в полёте и в переходе камеры тоже), за камерой/у near — не рисуется. Дальность — от камеры: 10/20/**30**/50/75/100/150 м/unlimited. Ближние первыми; подпись, налезающая на уже поставленную, поднимается над ней (до 3 раз), иначе пропускается; не больше 48. Фон — чёрный 45 %, текст белый (как Xbox), шрифт ×0.85; цель — жёлтая рамка.
 - **Цель (info: target, F5)** — моб с наименьшим углом между направлением камеры и центром тела (`pos.z + высота/2`), ≤ 12°, без ограничения дальности, сквозь стены; текущая цель держится, пока ≤ 16° и не хуже лучшей на 3° (без мигания). Жёлтые уголки на центре тела; панель справа с 40 % высоты, ширина ≤ 38 % экрана (не закрывает центр; ниже панели showCameraPosition, в стороне от строк полёта/триггеров/надписи F10): имя, класс/объект/вид, HP и %, уровень/урон/защита/сопротивление, move, по уровню AI/кулдауны/цель, дистанция/угол/высота, позиция (L4), урон.
 - **Сводка** (как Xbox-список) — внизу слева над строкой триггеров: `monsters [уровень] Monsters: N  labels a / b in 30 m  Characters (L4)  FROZEN  damage info`.
@@ -72,7 +72,32 @@
 - Офлайн-тест v0.10.2: подделка — ActorManager (монстры через элементы с персонажем в `+8`, NPC/герой/предмет/плохой указатель напрямую, Skel_A01 в обоих — посчитан один раз). Все сценарии прошли.
 
 ## 8. Проверка v0.10.2 в игре (2026-10-20) — работает
+- Ответы пользователя после 11: **F5 для info: target — оставить**; вопрос «имя и HP на всех уровнях» снят — уровни убраны (задача 12, §9).
 - Пользователь: «теперь всё работает». Лог (`logs/dbgmenu.log`, 00:44–00:49): `ActorManagers 1 (entries +0x5C 22, characters +0x20 24)`, 46 объектов → **20 персонажей (19 монстров, 1 игрок)**; «не персонажи» — сундуки (`base/basechest > base/simpleinteractive > Character`!), клетки, фонари, эффекты (без NPC/Monster в цепочке — верно отсеяны). Ни одного «not a plain getter» / «getPos not a known one», исключений нет.
 - Классы — пути скриптов: `skeleton/skeleton > skeleton_common/skeleton_common > base/tmonster > MonsterBaseNative > Monster`, `zone02_cage/...`, `human_ghost/human_ghost`, `dust/dust > Crow`, `skeleton_ghost/skeleton_ghost`, `death/darkreaperghost`. Имена объектов — уровня (`Z2_MD3_RM06_ENC_Lich_01_3`, `Skele_02`, `zone02_lcage_sitskeleton_02`).
 - Поля [ПОДТВ логом]: HP/max (`252/252`, `6305/6313` — getMaxHealth), урон 14, move `MonsterIdle`, AI `base/tbehavior: Strafe` (класс поведения + `+0xF8 → +0xB0`), **кулдауны map `+0x120` с узлом Name `+0x10` / float `+0x18`** (`Fidget 12.8`), удары по падению HP (`hit … -7.7 hp`). Под вопросом: `lvl 1`, `def 0`, `res 0` у скелетов в клетках (возможно, так и есть у декоративных мобов) — смысл `stats+0x18` пока [ГИП].
 - Цель (F5): переключается по взгляду (угол ≤ 12°, 289…1613 ед.); производительность: сбор 0.005 мс, отрисовка ~0.1 мс (макс. 0.38) при 25 персонажах. freeze и damage info — без замечаний (опция игрока DamageIndicators = 1, профиль не трогался: «saved / compared 0 times»).
+
+## 9. v0.11 (задача 12): папка Display вместо info level
+- Решение пользователя: не смешивать поля в уровни 1–4, игрок сам выбирает строки. `g_monLevel` и пункт info level удалены; **`g_monShow[MF_COUNT]`** (`common.h`, по умолчанию **name и HP**), `Mon_ShowAll(on)`; галочки не сохраняются между запусками; F10 off их не трогает (как и дальность/show).
+- **Все поля, что раздел умел показывать на уровнях 1–4** (по коду v0.10.2: `BuildLines` — подписи, `DrawTargetPanel` — панель), → 12 переключателей, порядок = порядок строк:
+  | MF_ | пункт | подпись (nearby) | панель (target) | было |
+  |---|---|---|---|---|
+  | NAME | name | имя (+ `[frozen]` при freeze) | имя + `[frozen]` | всегда |
+  | CLASS | class (target only) | — (длинно) | `class … object … (monster/NPC/player)` | панель всегда |
+  | HP | HP | `cur/max HP` (`HP n/a`) | `HP cur / max (%)` + `(base max)` | всегда |
+  | LEVEL | level | `lvl N` (в строке HP, если оба on) | `level N` (в строке со статами) | подпись всегда, панель всегда |
+  | STATS | damage / defense / resistance | одна строка | одна строка (вместе с level) | L4 / панель всегда |
+  | MOVE | move state | `move:` | `move:` | L1 / панель всегда |
+  | AI | AI behaviour | `AI:` (монстры) | `AI:` (монстры) | L2 |
+  | COOLDOWNS | cooldowns | `cooldowns:` (монстры) | то же | L3 |
+  | TARGET | target | `target: … (units, m)` | то же (монстры) | L4 |
+  | DIST | distance (target only) | — | `distance … angle … top …` | панель всегда |
+  | POS | position | `pos` | `pos` | L4 |
+  | HITS | hits | последний удар 4 с | удар/сумма или «no hits yet» | при damage info |
+  Плюс действия **all on / all off**. Группа: defense + resistance объединены с damage (как было одной строкой) — один переключатель.
+- **hits** — только при включённом damage info (подсчёт `DmgUpdate` работает только при нём), по умолчанию **off** по правилу «name/HP on, остальное off» → в v0.11 damage info сам по себе даёт только цифры игры, строку удара — Display > hits (вопрос пользователю, не включить ли hits по умолчанию).
+- Подпись без строк (`n == 0`) не рисуется (ни рамки, ни места); нет ни одной «подписной» строки (`AnyLabelLine`: без class/distance, hits — только при damage info) → `DrawLabels` не вызывается, в сводке `labels: all lines off (Display)`. Панель без строк (`AnyPanelLine`) — заголовок + «all lines are off (Monsters > Display)», уголки цели остаются.
+- Сводка: убран заголовок уровня; `Characters: N (NPC, player)` — теперь всегда (было только L4). Лог: вместо `level N` — `display name HP …` (`ShowText`) в `info ON`, 5-секундной статистике и тест-команде 18.
+- Сбор, фильтр, проекция, дальность, цель, damage info, freeze, F5, F10 off — без изменений.
+- Офлайн-тест: `menu_pc.md` §8 (кадры 1682–1720, 1800–1860, shot63–73). Проверено: подписи только с именем, + class не меняет подписи (только панель), all off → `labels 0`, панель «all lines are off», all on + damage + удар → строка hit в подписи и панели.

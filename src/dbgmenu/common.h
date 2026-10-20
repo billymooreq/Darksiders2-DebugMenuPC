@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.10.2 (task 11)"
+#define DBGMENU_VERSION "dbgmenu v0.11 (task 12)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);
@@ -178,7 +178,11 @@ extern bool g_monNearby;           // menu Monsters -> info: nearby (labels over
 extern bool g_monTarget;           // menu Monsters -> info: target (panel of the monster in the centre; key F5)
 extern bool g_monDamage;           // menu Monsters -> damage info (the game's DamageIndicators while on)
 extern bool g_monFreeze;           // menu Monsters -> freeze monsters (toggleMonsterUpdate, byte 0x014D4278)
-extern int g_monLevel;             // menu Monsters -> info level: 0..3 = Xbox showCharacterInfo levels 1..4
+// task 12: menu Monsters > Display - one switch per line of the labels and the target panel (order of the lines)
+enum { MF_NAME, MF_CLASS, MF_HP, MF_LEVEL, MF_STATS, MF_MOVE, MF_AI, MF_COOLDOWNS, MF_TARGET, MF_DIST, MF_POS, MF_HITS,
+       MF_COUNT };
+extern bool g_monShow[MF_COUNT];   // default: name and HP on (not saved between runs)
+void Mon_ShowAll(bool on);         // Display > all on / all off
 extern int g_monRange;             // menu Monsters -> nearby range (index: 10 20 30 50 75 100 150 m, unlimited)
 extern int g_monWho;               // menu Monsters -> show: MW_*
 void Mon_Frame();                  // game thread, once per game frame (before the frame): freeze / damage flags
