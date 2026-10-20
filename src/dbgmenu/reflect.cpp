@@ -678,6 +678,8 @@ NAKED static void FG_Byte11D() { __asm { mov al, byte ptr [ecx + 0x11D] } __asm 
 NAKED static void FG_Byte11F() { __asm { mov al, byte ptr [ecx + 0x11F] } __asm { ret } }
 NAKED static void FG_Bit140() { __asm { mov eax, dword ptr [ecx + 0x140] } __asm { shr eax, 1 } __asm { and al, 1 } __asm { ret } }
 NAKED static void FG_Int14() { __asm { mov eax, dword ptr [ecx + 0x14] } __asm { ret } }
+NAKED static void FG_Name48() { __asm { lea eax, [ecx + 0x48] } __asm { ret } }
+NAKED static void FG_Name58() { __asm { lea eax, [ecx + 0x58] } __asm { ret } }
 NAKED static void FG_Name130() { __asm { lea eax, [ecx + 0x130] } __asm { ret } }
 NAKED static void FG_Float150() { __asm { fld dword ptr [ecx + 0x150] } __asm { ret } }
 NAKED static void FG_VirtPos() { __asm { mov eax, [ecx] } __asm { jmp dword ptr [eax + 0x38] } }
@@ -691,6 +693,8 @@ HOLDER(FH_Byte11F, FG_Byte11F)
 HOLDER(FH_Bit140, FG_Bit140)
 HOLDER(FH_Int14, FG_Int14)
 HOLDER(FH_Name130, FG_Name130)
+HOLDER(FH_Name48, FG_Name48)
+HOLDER(FH_Name58, FG_Name58)
 HOLDER(FH_Float150, FG_Float150)
 HOLDER(FH_VirtPos, FG_VirtPos)
 HOLDER(FH_Odd, FG_Odd)
@@ -718,7 +722,8 @@ NAKED void Refl_FakeGetPos()
 }
 
 enum { FP_NAME, FP_ONESHOT, FP_ENABLE, FP_REQWORLD, FP_FLAG140, FP_OBJECTID, FP_POSITION, FP_FILTER, FP_NAMEFILTER,
-       FP_ONENTER, FP_WAYPOINT, FP_MAXDIST, FP_LOADONENTER, FP_ODD, FP_COUNT };
+       FP_ONENTER, FP_WAYPOINT, FP_MAXDIST, FP_LOADONENTER, FP_ODD,
+       FP_WORLDFILE, FP_REGION, FP_STARTPOINT, FP_ID, FP_COUNT };  // task 14: WorldLoadModule, module ID
 static const struct { const char *name; void (*type)(); void (*elem)(); void (*holder)(); void (*count)();
                       void (*reserve)(); } kFakeProps[FP_COUNT] = {
     {"Name", FT_Name, FT_Zero, FH_Name50, NULL, NULL},
@@ -735,6 +740,10 @@ static const struct { const char *name; void (*type)(); void (*elem)(); void (*h
     {"MaxDistance", FT_Float, FT_Zero, FH_Float150, NULL, NULL},
     {"LoadOnEnter", FT_Array, FT_Vec, NULL, FC_168, FR_164},
     {"Mystery", FT_Int, FT_Zero, FH_Odd, NULL, NULL},
+    {"WorldFile", FT_Name, FT_Zero, FH_Name48, NULL, NULL},
+    {"Region", FT_Name, FT_Zero, FH_Name50, NULL, NULL},
+    {"StartPoint", FT_Name, FT_Zero, FH_Name58, NULL, NULL},
+    {"ID", FT_Int, FT_Zero, FH_Int14, NULL, NULL},
 };
 static void *s_fpVt[FP_COUNT][0x70 / 4];
 static __declspec(align(8)) BYTE s_fp[FP_COUNT][0x18];
@@ -756,6 +765,7 @@ void Refl_FakeClass(void *cls, const char *name, void *parent, void **props, int
 
 // the fake property FP_x (index into kFakeProps); names: Name OneShot Enable RequireInWorld IncludeGrabbables
 // ObjectID Position FilterList NameFilter OnEnterList Waypoint MaxDistance LoadOnEnter Mystery
+// WorldFile (+0x48) Region (+0x50) StartPoint (+0x58) ID (+0x14)
 void *Refl_FakeProp(int i)
 {
     if (i < 0 || i >= FP_COUNT) return NULL;

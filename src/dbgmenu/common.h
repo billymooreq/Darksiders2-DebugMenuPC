@@ -6,7 +6,7 @@
 #include <windows.h>
 #include <d3d9.h>
 
-#define DBGMENU_VERSION "dbgmenu v0.12 (task 13)"
+#define DBGMENU_VERSION "dbgmenu v0.12.1 (task 14)"
 
 // ---- dllmain.cpp: log, identity, image ranges ----
 void Log(const char *fmt, ...);

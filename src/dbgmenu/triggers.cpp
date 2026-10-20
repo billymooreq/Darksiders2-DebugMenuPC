@@ -147,12 +147,19 @@ static void FakeObj(int i, void **vt, int shape, float x, float y, float z, floa
 // task 13: classes, names and fields of the fake triggers for the trigger info (layout of the real TriggerRegion:
 // +0xE0 FilterList, +0xF8 NameFilter, +0x104 OnEnterList, +0x11C OneShot ...; +0x130 Waypoint, +0x150 MaxDistance,
 // +0x164 LoadOnEnter are the fake places of the other classes; +0x170 = the fake class)
-enum { FK_DET, FK_TRIG, FK_KILL, FK_SCRIPTKILL, FK_LOAD, FK_CAM, FK_HANDLER, FK_COUNT };
+enum { FK_DET, FK_TRIG, FK_KILL, FK_SCRIPTKILL, FK_LOAD, FK_CAM, FK_HANDLER,
+       FK_VSEH, FK_VSM, FK_EVM, FK_TEM, FK_SAVE, FK_WLM, FK_COUNT };  // task 14: script handler / modules
 static __declspec(align(8)) BYTE s_fCls[FK_COUNT][0x30];
 static void *s_fClsProps[FK_COUNT][8];
 static __declspec(align(8)) DWORD s_fNames[8][2];
 static BYTE s_fakePlayer[16];
 static __declspec(align(8)) BYTE s_fHandler[0x180], s_fNode[0x10], s_fBody[0x40];
+// task 14: door handler -> TriggerEventModule -> SaveDataModule -> WorldLoadModule (+ a link back: a cycle);
+// OnEnterList "Z2_Cine_VSM" -> an object with its own handler -> a module without links; the capsule: a handler
+// without a module (only its name is shown)
+static __declspec(align(8)) BYTE s_fMod[4][0x180], s_fHandler2[0x180], s_fHandler3[0x180], s_fCine[0x180],
+    s_fNode2[0x10], s_fNode3[0x10], s_fLinks[3][2][16];
+static void *s_fakeFindName, *s_fakeFindObj;   // test mode: World::find answers this one name
 static void *s_fBodyObjs[4];
 static int s_fBodyCounts[4];
 static BYTE s_fDoneEnter;
@@ -170,11 +177,14 @@ static void FakeArr(BYTE *o, int ofs, void *data, int n)
 static void FakeInfoFields()
 {
     static const char *const kCls[FK_COUNT] = {"DetectorObject", "TriggerRegion", "KillRegion", "killregiontrigger",
-                                               "LoadRegion", "CameraInfluenceTriggerRegion", "TriggerEventHandler"};
+                                               "LoadRegion", "CameraInfluenceTriggerRegion", "TriggerEventHandler",
+                                               "VisScriptEventHandler", "VisScriptModule", "EventModule",
+                                               "TriggerEventModule", "SaveDataModule", "WorldLoadModule"};
     // property indexes of reflect.cpp kFakeProps
     static const int kProps[FK_COUNT][8] = {{0, 5, 6, -1}, {1, 2, 3, 4, 7, 8, 9, 13}, {10, -1}, {-1}, {12, -1},
-                                            {11, -1}, {0, -1}};
-    static const int kParent[FK_COUNT] = {-1, FK_DET, FK_TRIG, FK_KILL, FK_DET, FK_DET, -1};
+                                            {11, -1}, {0, -1}, {-1}, {17, -1}, {-1}, {-1}, {-1}, {14, 15, 16, -1}};
+    static const int kParent[FK_COUNT] = {-1, FK_DET, FK_TRIG, FK_KILL, FK_DET, FK_DET, FK_VSEH, -1, -1, FK_VSM,
+                                          FK_EVM, FK_VSM, FK_VSM};
     for (int c = 0; c < FK_COUNT; c++) {
         int n = 0;
         for (int k = 0; k < 8 && kProps[c][k] >= 0; k++) s_fClsProps[c][n++] = Refl_FakeProp(kProps[c][k]);
@@ -221,6 +231,43 @@ static void FakeInfoFields()
     *(void **)(s_fBody + 0x24) = door;
     *(void ***)(s_fBody + 0x28) = s_fBodyObjs;
     *(int **)(s_fBody + 0x34) = s_fBodyCounts;
+    *(void **)(s_fHandler + 0xB0) = s_fMod[0];
+    // task 14: the modules (ID +0x14, links +0x28 {data, count}, 16 bytes {output, id, input, target})
+    static const int kModCls[4] = {FK_TEM, FK_SAVE, FK_WLM, FK_TEM}, kModId[4] = {1, 10, 11, 1};
+    for (int i = 0; i < 4; i++) {
+        BYTE *m = s_fMod[i];
+        memset(m, 0, sizeof(s_fMod[i]));
+        *(void ***)m = s_fakeVtDet;
+        *(void **)(m + 0x170) = s_fCls[kModCls[i]];
+        *(int *)(m + 0x14) = kModId[i];
+    }
+    memset(s_fLinks, 0, sizeof(s_fLinks));
+    *(int *)(s_fLinks[0][0] + 4) = 10, *(void **)(s_fLinks[0][0] + 12) = s_fMod[1];    // TEM -> SaveData
+    *(int *)(s_fLinks[1][0] + 4) = 11, *(void **)(s_fLinks[1][0] + 12) = s_fMod[2];    // SaveData -> WorldLoad
+    *(int *)(s_fLinks[1][1] + 4) = 1, *(void **)(s_fLinks[1][1] + 12) = s_fMod[0];     // ... and back (a cycle)
+    *(void **)(s_fMod[0] + 0x28) = s_fLinks[0], *(int *)(s_fMod[0] + 0x2C) = 1;
+    *(void **)(s_fMod[1] + 0x28) = s_fLinks[1], *(int *)(s_fMod[1] + 0x2C) = 2;
+    Refl_FakeName(s_fMod[2] + 0x48, "z3_world");
+    Refl_FakeName(s_fMod[2] + 0x50, "Z3_Hub");
+    Refl_FakeName(s_fMod[2] + 0x58, "PlayerStart_FromZ2");
+    BYTE *hs[2] = {s_fHandler2, s_fHandler3};
+    for (int i = 0; i < 2; i++) {
+        memset(hs[i], 0, 0x180);
+        *(void ***)hs[i] = s_fakeVtDet;
+        *(void **)(hs[i] + 0x170) = s_fCls[FK_HANDLER];
+    }
+    *(void **)(s_fHandler2 + 0xB0) = s_fMod[3];                      // a module without links
+    Refl_FakeName(s_fHandler3 + 0x50, "Capsule_VSM");                // no module
+    memset(s_fCine, 0, sizeof(s_fCine));
+    *(void ***)s_fCine = s_fakeVtDet;
+    *(void **)(s_fCine + 0x64) = s_fNode2;
+    memset(s_fNode2, 0, sizeof(s_fNode2));
+    *(void **)(s_fNode2 + 4) = s_fHandler2;
+    memset(s_fNode3, 0, sizeof(s_fNode3));
+    *(void **)(s_fNode3 + 4) = s_fHandler3;
+    *(void **)(s_fakeObj[4] + 0x64) = s_fNode3;                     // Capsule_Trg
+    s_fakeFindName = (void *)kStr[3];                                 // World::find("Z2_Cine_VSM")
+    s_fakeFindObj = s_fCine;
     Refl_FakeName(s_fakeObj[1] + 0x130, kStr[4]);                    // KillRegion Waypoint
     *(float *)(s_fakeObj[3] + 0x150) = 450.0f;                       // MaxDistance
     *(void ***)s_fakePlayer = s_fakeVtActor;
@@ -1367,6 +1414,7 @@ struct TInfo {
     char dest[400], destShort[96];
     char events[480], eventsShort[96];
     char filter[240], flags[200], state[200];
+    char chainLog[900];          // task 14: the listener -> module chain (log at a target change)
     int nProps, nUnread;
 };
 static TInfo s_info[kInfoSlots];
@@ -1628,6 +1676,198 @@ static int Listeners(void *obj, char *out, int size)
     return n;
 }
 
+
+// ---- task 14: where the visual scripts that listen to the trigger lead (notes/triggers_pc.md §9) ----
+// trigger +0x64 listener = TriggerEventHandler (VisScriptEventHandler) -> +0xB0 its module (TriggerEventModule;
+// 0x00A06349 checks it is one) -> module +0x28 {data, count} event links of 16 bytes {output, target id, input,
+// target module} (fire output 0x004A2C2A: target->vt[0x84](input)) -> ... -> WorldLoadModule (WorldFile, Region,
+// StartPoint), RespawnModule, LoaderModule, ObjectMoverModule, CinematicModule: their fields by reflection.
+// Objects named in OnEnterList / OnExitList are found like the game does (World::find 0x00A46514, the trigger's
+// world +0x58) and their listeners are followed too. Breadth first, 3 links deep, each module once (cycles).
+#define OFS_HANDLER_MODULE 0xB0
+#define OFS_MODULE_LINKS   0x28
+#define OFS_OBJ_WORLD_T    0x58
+#define PC_WORLD_FIND      0x00A46514u   // WorldObject *__thiscall World::find(Name *) (loaded regions)
+static const int kChainDepth = 3, kChainMax = 32;
+typedef void *(__fastcall *WorldFind_t)(void *world, void *edx, const void *name);
+
+static void *FindByName(void *world, const char *text, const void *name)
+{
+    if (TrigFake()) return (s_fakeFindName && !strcmp(text, (const char *)s_fakeFindName)) ? s_fakeFindObj : NULL;
+    static const BYTE kPro[] = {0x55, 0x8B, 0xEC, 0x51, 0x51, 0x8B, 0x55, 0x08, 0x8B, 0x02, 0x0B, 0x42, 0x04};
+    if (!world || !InImage(*(void **)world) || memcmp((void *)PC_WORLD_FIND, kPro, sizeof(kPro))) return NULL;
+    void *o = ((WorldFind_t)(UINT_PTR)PC_WORLD_FIND)(world, NULL, name);
+    return (o && InImage(*(void **)o)) ? o : NULL;
+}
+
+struct ChainCtx {
+    void *seen[kChainMax];
+    struct { void *m; int depth; char via[96]; } q[kChainMax];
+    int nq, nseen;
+    char dest[400], handler[120], log[900];
+};
+
+static void ChainLog(ChainCtx &c, const char *s)
+{
+    if (c.log[0]) strncat_s(c.log, sizeof(c.log), " | ", _TRUNCATE);
+    strncat_s(c.log, sizeof(c.log), s, _TRUNCATE);
+}
+
+static void ChainPush(ChainCtx &c, void *m, int depth, const char *via)
+{
+    if (!m || c.nq >= kChainMax) return;
+    for (int i = 0; i < c.nseen; i++)
+        if (c.seen[i] == m) return;
+    if (c.nseen < kChainMax) c.seen[c.nseen++] = m;
+    c.q[c.nq].m = m;
+    c.q[c.nq].depth = depth;
+    strncpy_s(c.q[c.nq].via, sizeof(c.q[c.nq].via), via, _TRUNCATE);
+    c.nq++;
+}
+
+// the listeners of one object -> their modules
+static void ChainSeed(ChainCtx &c, void *obj, const char *via)
+{
+    BYTE *node = *(BYTE **)((BYTE *)obj + OFS_OBJ_LISTENERS);
+    for (int k = 0; node && k < 16; k++, node = *(BYTE **)(node + 8)) {
+        void *l = *(void **)(node + 4);
+        if (!l) l = *(void **)node;
+        if (!l || !Refl_IsKindOf(l, "VisScriptEventHandler")) continue;
+        void *m = *(void **)((BYTE *)l + OFS_HANDLER_MODULE);
+        void *mc = m ? Refl_ClassOf(m) : NULL;
+        char one[200];
+        const char *hn = Refl_ObjName(l);
+        if (!c.handler[0])
+            TSPRINTF(c.handler, "%s%s%s%s", Refl_ClassName(Refl_ClassOf(l)), hn[0] ? " '" : "", hn, hn[0] ? "'" : "");
+        TSPRINTF(one, "%s listener %s '%s' -> module %s", via, Refl_ClassName(Refl_ClassOf(l)), hn,
+                 mc ? Refl_ClassName(mc) : (m ? "(not a class)" : "none"));
+        ChainLog(c, one);
+        if (mc && Refl_IsKindOf(m, "VisScriptModule")) ChainPush(c, m, 0, via);
+    }
+}
+
+static void DestAdd(ChainCtx &c, const char *s)
+{
+    if (strstr(c.dest, s)) return;  // the same target reached twice
+    if (c.dest[0]) strncat_s(c.dest, sizeof(c.dest), "; ", _TRUNCATE);
+    strncat_s(c.dest, sizeof(c.dest), s, _TRUNCATE);
+}
+
+// one module: what it says about the destination ("" = nothing)
+static void ModuleDest(ChainCtx &c, void *m)
+{
+    char a[96], b[96], e[96], f[96], one[360];
+    const char *cls = Refl_ClassName(Refl_ClassOf(m));
+    bool ga = false, gb = false, ge = false, gf = false;
+    if (Refl_IsKindOf(m, "WorldLoadModule")) {
+        ga = Refl_Get(m, "WorldFile", a, sizeof(a)) && a[0] && strcmp(a, "\"\"");
+        gb = Refl_Get(m, "Region", b, sizeof(b)) && b[0] && strcmp(b, "\"\"");
+        ge = Refl_Get(m, "StartPoint", e, sizeof(e)) && e[0] && strcmp(e, "\"\"");
+        gf = Refl_Get(m, "StartLoadRegion", f, sizeof(f)) && f[0] && strcmp(f, "\"\"");
+        TSPRINTF(one, "world %s%s%s%s%s%s%s", ga ? a : "?", gb ? ", region " : "", gb ? b : "", ge ? ", start " : "",
+                 ge ? e : "", gf ? ", load region " : "", gf ? f : "");
+        DestAdd(c, one);
+    } else if (Refl_IsKindOf(m, "RespawnModule")) {
+        ga = Refl_Get(m, "WorldName", a, sizeof(a)) && a[0] && strcmp(a, "\"\"");
+        gb = Refl_Get(m, "RegionName", b, sizeof(b)) && b[0] && strcmp(b, "\"\"");
+        ge = Refl_Get(m, "SpawnPointName", e, sizeof(e)) && e[0] && strcmp(e, "\"\"");
+        TSPRINTF(one, "respawn: world %s%s%s%s%s", ga ? a : "-", gb ? ", region " : "", gb ? b : "",
+                 ge ? ", point " : "", ge ? e : "");
+        DestAdd(c, one);
+    } else if (Refl_IsKindOf(m, "LoaderModule")) {
+        char l[300], u[300];
+        RegionList(m, "Load", l, sizeof(l));
+        RegionList(m, "Unload", u, sizeof(u));
+        if (l[0] || u[0]) {
+            TSPRINTF(one, "script %s%s%s%s", l[0] ? "loads " : "", l, l[0] && u[0] ? ", unloads " : (u[0] ? "unloads " : ""),
+                     u);
+            DestAdd(c, one);
+        }
+    } else if (Refl_IsKindOf(m, "ObjectMoverModule")) {
+        ga = Refl_Get(m, "ObjectName", a, sizeof(a)) && a[0] && strcmp(a, "\"\"");
+        gb = Refl_Get(m, "WaypointName", b, sizeof(b)) && b[0] && strcmp(b, "\"\"");
+        if (gb) {
+            TSPRINTF(one, "moves %s to %s", ga ? a : "?", b);
+            DestAdd(c, one);
+        }
+    } else if (Refl_IsKindOf(m, "CinematicModule")) {
+        if (Refl_Get(m, "CinematicName", a, sizeof(a)) && a[0] && strcmp(a, "\"\"")) {
+            TSPRINTF(one, "cinematic %s", a);
+            DestAdd(c, one);
+        }
+    } else {
+        // another module with a place in it (scripted modules: Waypoint, SpawnPoint...)
+        static const char *const kAny[] = {"WorldFile", "StartPoint", "SpawnPointName", "SpawnPoint", "WaypointName",
+                                           "Waypoint"};
+        for (int i = 0; i < (int)(sizeof(kAny) / sizeof(kAny[0])); i++)
+            if (Refl_Get(m, kAny[i], a, sizeof(a)) && a[0] && strcmp(a, "\"\"")) {
+                TSPRINTF(one, "%s: %s %s", cls, kAny[i], a);
+                DestAdd(c, one);
+                break;
+            }
+    }
+}
+
+static void ChainWalk(ChainCtx &c)
+{
+    for (int i = 0; i < c.nq; i++) {
+        void *m = c.q[i].m;
+        char id[24] = "";
+        Refl_Get(m, "ID", id, sizeof(id));
+        size_t before = strlen(c.dest);
+        ModuleDest(c, m);
+        char one[200];
+        TSPRINTF(one, "[%d] %s #%s (%s)%s%s", c.q[i].depth, Refl_ClassName(Refl_ClassOf(m)), id[0] ? id : "?",
+                 c.q[i].via, strlen(c.dest) > before ? " => " : "", strlen(c.dest) > before ? c.dest + before : "");
+        ChainLog(c, one);
+        if (c.q[i].depth >= kChainDepth) continue;
+        BYTE *data = *(BYTE **)((BYTE *)m + OFS_MODULE_LINKS);
+        int n = *(int *)((BYTE *)m + OFS_MODULE_LINKS + 4);
+        if (n <= 0 || !data) continue;
+        if (n > 64) n = 64;
+        for (int k = 0; k < n; k++) {
+            void *t = *(void **)(data + k * 16 + 12);
+            if (t && Refl_ClassOf(t) && Refl_IsKindOf(t, "VisScriptModule")) ChainPush(c, t, c.q[i].depth + 1, c.q[i].via);
+        }
+    }
+}
+
+// the scripts behind the trigger: c.dest = destinations found, c.handler = the first listener, c.log = the chain
+static void ScriptChain(void *obj, ChainCtx &c)
+{
+    memset(&c, 0, sizeof(c));
+    __try {
+        ChainSeed(c, obj, "trigger:");
+        // the objects its OnEnterList / OnExitList send events to
+        void *world = *(void **)((BYTE *)obj + OFS_OBJ_WORLD_T);
+        static const char *const kLists[2] = {"OnEnterList", "OnExitList"};
+        for (int li = 0; li < 2; li++) {
+            const PV *v = PVGet(kLists[li]);
+            if (!v || !v->ok) continue;
+            DWORD names[32];
+            int per = 0, n = Refl_GetArrayDwords(obj, kLists[li], names, 32, &per);
+            for (int k = 0; k < n && per == 2; k++) {
+                const DWORD *nm = &names[k * 2];
+                char text[96];
+                TSTRCPY(text, Refl_NameText(nm));
+                char *colon = strchr(text, ':');
+                DWORD key[2] = {nm[0], nm[1]};
+                if (colon) continue;  // "Object:Event": the object name is only a part of it - not looked up
+                void *o = FindByName(world, text, key);
+                char via[96], one[160];
+                TSPRINTF(via, "%s -> %s:", kLists[li], text);
+                TSPRINTF(one, "%s %s", via, o ? "found" : "not found in the loaded world");
+                ChainLog(c, one);
+                if (o) ChainSeed(c, o, via);
+            }
+        }
+        ChainWalk(c);
+    } __except (CatchTr("script chain", GetExceptionInformation())) {
+        ChainLog(c, "(exception - stopped)");
+    }
+    if (!c.log[0]) TSTRCPY(c.log, "no script listeners");
+}
+
 static const char *const kDestProps[] = {"WorldFile", "Region", "StartPoint", "StartLoadRegion", "Waypoint",
     "SpawnRegion", "SpawnPoint", "SpawnLoadRegion", "Level", "Room", "PortalCameraWaypoint", "OrientationWaypoint",
     "Target", "TargetName", "Destination", "TeleportDestination", "TeleportLocation", "HUDText", "MapTileClass"};
@@ -1670,6 +1910,19 @@ static void ReadInfo(TInfo &ti, void *obj)
     if (const char *v = PVText("ConditionalLoads")) {
         char one[80];
         TSPRINTF(one, "%sconditional loads %s", ti.dest[0] ? "; " : "", v);
+        TSTRCAT(ti.dest, one);
+    }
+    // task 14: the scripts behind it first (a world transition is what "leads to" is about), else the listener
+    static ChainCtx cc;
+    ScriptChain(obj, cc);
+    TSTRCPY(ti.chainLog, cc.log);
+    if (cc.dest[0]) {
+        char own[400];
+        TSTRCPY(own, ti.dest);
+        TSPRINTF(ti.dest, "%s%s%s", cc.dest, own[0] ? "; " : "", own);
+    } else if (cc.handler[0]) {
+        char one[160];
+        TSPRINTF(one, "%sscript: %s", ti.dest[0] ? "; " : "", cc.handler);
         TSTRCAT(ti.dest, one);
     }
     Short(ti.destShort, sizeof(ti.destShort), ti.dest[0] ? ti.dest : "-", 70);
@@ -1873,6 +2126,7 @@ static void LogTarget(const TItem &it, const TInfo &ti)
         it.c[1], it.c[2], it.shape, ti.state);
     Log("triggers:   leads to: %s | events: %s | who: %s | flags: %s", ti.dest[0] ? ti.dest : "-",
         ti.events[0] ? ti.events : "-", ti.filter[0] ? ti.filter : "-", ti.flags[0] ? ti.flags : "-");
+    Log("triggers:   script chain: %s", ti.chainLog);
     for (int i = 0; i < s_tAllN; i++) Log("triggers:   %s", s_tAll[i]);
     if (s_tAllTotal > s_tAllN) Log("triggers:   ... %d more properties", s_tAllTotal - s_tAllN);
 }
