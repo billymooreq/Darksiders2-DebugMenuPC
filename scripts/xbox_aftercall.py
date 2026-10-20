@@ -2,7 +2,9 @@
 Usage: python -I xbox_aftercall.py <func VA> [disp hex filter] [n=6]"""
 import sys, os, struct, bisect
 import capstone
-W = "<xbox project>"
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ds2paths import xbox_dir
+W = xbox_dir()  # Xbox reference project, read-only
 IMG = open(os.path.join(W, "dumps", "DarksidersDebug.pe"), "rb").read()
 B = 0x82000000
 md = capstone.Cs(capstone.CS_ARCH_PPC, capstone.CS_MODE_32 | capstone.CS_MODE_BIG_ENDIAN)

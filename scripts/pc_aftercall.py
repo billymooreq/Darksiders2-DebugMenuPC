@@ -4,7 +4,9 @@ import sys, struct, os
 sys.argv[0] = os.path.join(os.path.dirname(os.path.abspath(__file__)), "pcfind.py")
 import importlib.util
 spec = importlib.util.spec_from_file_location("pcfind_mod", sys.argv[0])
-EXE = "<game dir>/Darksiders2.exe"
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ds2paths import game_exe
+EXE = game_exe()
 import pefile, capstone
 pe = pefile.PE(EXE, fast_load=True); B = pe.OPTIONAL_HEADER.ImageBase; IMG = pe.get_memory_mapped_image()
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)

@@ -3,7 +3,9 @@ Usage: python -I pc_fieldpair.py <OFF1 hex> <OFF2 hex> [N=4]   (finds e.g. actor
 import sys, struct, re
 import pefile, capstone
 from capstone import x86
-EXE = "<game dir>/Darksiders2.exe"
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ds2paths import game_exe
+EXE = game_exe()
 pe = pefile.PE(EXE, fast_load=True); B = pe.OPTIONAL_HEADER.ImageBase; IMG = pe.get_memory_mapped_image()
 md = capstone.Cs(capstone.CS_ARCH_X86, capstone.CS_MODE_32)
 T = [s for s in pe.sections if s.Name.startswith(b".text")][0]

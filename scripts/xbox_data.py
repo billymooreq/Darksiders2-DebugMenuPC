@@ -1,6 +1,8 @@
 """Xbox DEBUG image: where a dword value occurs (vtable slots, pointers). Usage: python -I xbox_data.py <VA>..."""
 import sys, os, struct
-W = "<xbox project>"
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ds2paths import xbox_dir
+W = xbox_dir()  # Xbox reference project, read-only
 IMG = open(os.path.join(W, "dumps", "DarksidersDebug.pe"), "rb").read()
 B = 0x82000000
 for arg in sys.argv[1:]:

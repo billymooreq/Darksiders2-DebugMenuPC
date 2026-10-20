@@ -1,7 +1,7 @@
 @echo off
-rem Build dbgmenu dinput8.dll v0.13 (x86, /MT) into _claudework\build\dinput8.dll
+rem Build dbgmenu dinput8.dll v0.13 (x86, /MT) into <repo>\build\dinput8.dll (+ dinput8.pdb, not in git)
 setlocal
-set "W=<repo>"
+call "%~dp0..\..\scripts\env.bat"
 set "S=%W%\src\dbgmenu"
 set "T=%W%\src\third_party"
 set "OUT=%W%\build"
@@ -15,6 +15,6 @@ call "%W%\scripts\msvc32.bat" cl /nologo /W3 /O2 /MT /EHsc /Zi /LD /DNDEBUG /DIM
   "%T%\imgui\backends\imgui_impl_dx9.cpp" "%T%\imgui\backends\imgui_impl_win32.cpp" ^
   "%T%\minhook\src\buffer.c" "%T%\minhook\src\hook.c" "%T%\minhook\src\trampoline.c" "%T%\minhook\src\hde\hde32.c" ^
   /Fo"%OBJ%\\" /Fd"%OBJ%\vc.pdb" /Fe"%OUT%\dinput8.dll" ^
-  /link /DEF:"%S%\dinput8.def" /DEBUG /OPT:REF /OPT:ICF /PDB:"%OUT%\dinput8.pdb" /IMPLIB:"%OBJ%\dinput8.lib" ^
+  /link /DEF:"%S%\dinput8.def" /DEBUG /OPT:REF /OPT:ICF /PDB:"%OUT%\dinput8.pdb" /PDBALTPATH:dinput8.pdb /IMPLIB:"%OBJ%\dinput8.lib" ^
   /DYNAMICBASE /NXCOMPAT kernel32.lib user32.lib
 endlocal

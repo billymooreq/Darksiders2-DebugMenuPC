@@ -1,0 +1,68 @@
+Darksiders II Debug Menu v0.13
+==============================
+
+What is it
+----------
+An unofficial mod for the original PC version of Darksiders II (2012). It adds part of the
+developers' debug menu from the Xbox 360 DEBUG build: free camera flight with teleport,
+visible trigger zones, enemy info and a few cheats.
+It does NOT work with Darksiders II Deathinitive Edition.
+
+Which game version
+------------------
+The original PC release from 2012. The mod was made for this Darksiders2.exe:
+  size 18 200 576 bytes, SHA-1 1402d08920a2343c0cfe261826ade47f008c6d42
+With another exe the mod stays off and the game runs as usual.
+
+Install (4 steps)
+-----------------
+1. Close the game.
+2. Open the game folder - the folder with Darksiders2.exe.
+3. Copy dinput8.dll from this zip into that folder.
+4. Start the game as usual and press F10.
+
+THE MAIN THING: F10
+-------------------
+After the game starts the debug menu is OFF. Press F10 to turn it on -
+"DEBUG MENU ON" appears at the top of the screen. Only then the other keys work.
+Press F10 again to turn everything off.
+
+Keys
+----
+F10            debug menu on / off
+F1             open / close the menu
+F2             free flight on / off
+F3             show / hide triggers
+F5             info panel of the enemy in the centre of the screen
+F6             info panel of the trigger in the centre of the screen
+
+In the flight:
+W A S D + mouse      fly and look
+Shift / Ctrl         faster / slower
+Space / C            up / down
+Enter or left click  move the hero to the camera
+R                    carry the hero in front of the camera / let him go
+T                    stop / run the game time
+F2                   end the flight
+
+In the menu:
+Up / Down       choose a line
+Enter           run, switch, or open
+Left / Right    change a value
+Esc, Backspace  back / close
+
+You can change F10, F1, F2, F3, F5, F6, R and T in the menu section "Keys".
+They are saved in dbgmenu_keys.ini in the game folder.
+
+Uninstall
+---------
+Delete dinput8.dll and dbgmenu_keys.ini from the game folder.
+
+Log
+---
+The mod writes dbgmenu.log in the game folder (the previous run: dbgmenu.prev.log).
+If F10 does nothing, open dbgmenu.log: the line "exe identity: UNKNOWN BUILD" means
+your Darksiders2.exe is a different version.
+
+More: https://github.com/billymooreq/Darksiders2-DebugMenu
+This is an unofficial fan project, not affiliated with THQ, Vigil Games or THQ Nordic.

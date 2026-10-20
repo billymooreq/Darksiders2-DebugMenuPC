@@ -5,7 +5,9 @@ A vtable start = the first of a run of .text pointers whose address is reference
 """
 import struct, sys
 import pefile
-EXE = "<game dir>/Darksiders2.exe"
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ds2paths import game_exe
+EXE = game_exe()
 pe = pefile.PE(EXE, fast_load=True)
 B = pe.OPTIONAL_HEADER.ImageBase
 IMG = pe.get_memory_mapped_image()

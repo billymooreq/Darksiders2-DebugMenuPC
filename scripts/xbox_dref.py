@@ -7,7 +7,9 @@ lfd/stfd/addi/lwzu/...) whose rA and displacement give VA. Cheap and approximate
 """
 import sys, os, struct, bisect
 import capstone
-W = "<xbox project>"  # Xbox project, read-only
+import sys as _sys, os as _os; _sys.path.insert(0, _os.path.dirname(_os.path.abspath(__file__)))
+from ds2paths import xbox_dir
+W = xbox_dir()  # Xbox reference project, read-only
 IMG = open(os.path.join(W, "dumps", "DarksidersDebug.pe"), "rb").read()
 B = 0x82000000
 FU = []
