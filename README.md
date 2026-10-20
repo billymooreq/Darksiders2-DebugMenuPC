@@ -14,9 +14,11 @@ It does **not** work with Darksiders II Deathinitive Edition.
 
 ![Trigger zones, camera position panel and free flight](docs/img/triggers.jpg)
 
-## Video
-
 <!-- drop dsoverview.mp4 here -->
+
+
+https://github.com/user-attachments/assets/b2859864-e85b-4ec9-a221-c5c7ec550033
+
 
 ## Features
 
