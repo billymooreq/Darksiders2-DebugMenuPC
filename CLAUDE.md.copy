@@ -32,7 +32,7 @@
 
 ## 4. Решения пользователя (2026-10-18)
 - **Коммиты и push разрешены**: в конце каждой задачи коммить, ставь тег `review-NN` и пушь **без отдельного вопроса** (схема §10). Для этого проекта это решение важнее общего правила из `~\.claude\CLAUDE.md` («план коммита и подтверждение»). `reset --hard`/переписывание истории — только по просьбе.
-- GitHub: **`git@github.com:billymooreq/Darksiders2-DebugMenu.git`** (**публичный** с 2026-10-20; ssh настроен). `gh` — `C:\Program Files\GitHub CLI\gh.exe` (может не быть в PATH, звать по полному пути; залогинен).
+- GitHub: **`git@github.com:billymooreq/Darksiders2-DebugMenu.git`** (**публичный** с 2026-10-20; пользователь переименовал репо в **`Darksiders2-DebugMenuPC`** — https://github.com/billymooreq/Darksiders2-DebugMenuPC, старый адрес GitHub перенаправляет, `origin` пока старый (смену url заблокировала проверка); ssh настроен). `gh` — `C:\Program Files\GitHub CLI\gh.exe` (может не быть в PATH, звать по полному пути; залогинен).
 - **Только клавиатура**, геймпад не нужен. Временные клавиши для тестов: **F1 — меню, F2 — playerFly** (потом поменяем).
 - Сторонний код разрешён: **MinHook, Dear ImGui** (в `_claudework\src\third_party\`, версии/лицензии — в `third_party\VERSIONS.md`).
 - Меню — в стиле Xbox-дебаг-меню (категории → пункты, подсветка строки, тёмная полупрозрачная панель).

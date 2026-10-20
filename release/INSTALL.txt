@@ -64,5 +64,5 @@ The mod writes dbgmenu.log in the game folder (the previous run: dbgmenu.prev.lo
 If F10 does nothing, open dbgmenu.log: the line "exe identity: UNKNOWN BUILD" means
 your Darksiders2.exe is a different version.
 
-More: https://github.com/billymooreq/Darksiders2-DebugMenu
+More: https://github.com/billymooreq/Darksiders2-DebugMenuPC
 This is an unofficial fan project, not affiliated with THQ, Vigil Games or THQ Nordic.
